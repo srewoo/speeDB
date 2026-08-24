@@ -1,0 +1,217 @@
+/**
+ * speeDB design tokens — from docs/UI-SPEC.md §3.
+ *
+ * Rule from the spec: every token has a value in BOTH themes. Nothing is
+ * defined only inside a media query, so an explicit `data-theme` choice and
+ * the system default can never disagree about which tokens exist.
+ */
+
+:root {
+  /* 3.1 neutral / surface -------------------------------------------------- */
+  --bg-canvas: #FAF7F2;
+  --bg-surface: #FFFDF9;
+  --bg-sunken: #F2EDE4;
+  --bg-inset: #F5F0E7;
+  --bg-hover: #F0EAE0;
+  --bg-active: #E8E0D3;
+  --bg-selected: #E4EFEC;
+  --bg-scrim: rgba(31, 28, 24, 0.40);
+  --border-hairline: #E4DCCF;
+  --border-strong: #CFC4B2;
+  --border-subtle: #EFE9DE;
+
+  /* 3.2 text --------------------------------------------------------------- */
+  --text-primary: #1F1C18;
+  --text-secondary: #57504A;
+  --text-tertiary: #7A6F66;
+  --text-disabled: #A79C90;
+  --text-inverse: #FFFDF9;
+  --text-link: #1F6F66;
+
+  /* 3.3 accent (muted teal) ------------------------------------------------ */
+  --accent-50: #EEF5F3;
+  --accent-100: #DCEAE7;
+  --accent-200: #B9D5CF;
+  --accent-400: #4E9186;
+  --accent-600: #1F6F66;
+  --accent-700: #1A5D55;
+  --accent-solid: #1F6F66;
+  --accent-solid-hover: #1A5D55;
+  --accent-solid-text: #FFFDF9;
+
+  /* 3.4 severity ----------------------------------------------------------- */
+  --sev-critical-fg: #A6362A; --sev-critical-bg: #F7E6E2; --sev-critical-border: #E0BCB3;
+  --sev-high-fg: #9C5B12;     --sev-high-bg: #F8EDDC;     --sev-high-border: #E2C79B;
+  --sev-medium-fg: #7A6A1F;   --sev-medium-bg: #F4F0DC;   --sev-medium-border: #D9CE9E;
+  --sev-low-fg: #55606B;      --sev-low-bg: #EAEDEF;      --sev-low-border: #C3CBD1;
+  --sev-info-fg: #1F6F66;     --sev-info-bg: #DCEAE7;     --sev-info-border: #B9D5CF;
+
+  /* 3.5 diff --------------------------------------------------------------- */
+  --diff-add-bg: #E7F0E4;
+  --diff-add-bg-emph: #CFE3C9;
+  --diff-add-rule: #5C8A4C;
+  --diff-add-marker: #3F6B33;
+  --diff-del-bg: #F7E7E2;
+  --diff-del-bg-emph: #EFCFC5;
+  --diff-del-rule: #B4664F;
+  --diff-del-marker: #96402F;
+  --diff-gutter-fg: #A79C90;
+  --diff-hunk-bg: #EDE7DB;
+
+  /* 3.6 status ------------------------------------------------------------- */
+  --status-ok-fg: #2E6B45;   --status-ok-bg: #E5EFE8;
+  --status-warn-fg: #9C5B12; --status-warn-bg: #F8EDDC;
+  --status-err-fg: #A6362A;  --status-err-bg: #F7E6E2;
+  --status-idle-fg: #7A6F66;
+
+  /* 3.10 elevation --------------------------------------------------------- */
+  --shadow-1: 0 1px 2px rgba(31, 28, 24, 0.05);
+  --shadow-2: 0 6px 16px -6px rgba(31, 28, 24, 0.14), 0 1px 2px rgba(31, 28, 24, 0.05);
+
+  /* ---- theme-independent -------------------------------------------------- */
+
+  /* 3.7 typography */
+  --font-ui: "Inter", -apple-system, "Segoe UI", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* 3.8 spacing */
+  --space-05: 2px; --space-1: 4px; --space-15: 6px; --space-2: 8px;
+  --space-3: 12px; --space-4: 16px; --space-5: 20px; --space-6: 24px;
+  --space-8: 32px; --space-10: 40px; --space-12: 48px; --space-16: 64px;
+
+  /* 3.9 radii */
+  --radius-xs: 3px; --radius-sm: 5px; --radius-md: 7px; --radius-lg: 10px;
+  --radius-pill: 999px;
+
+  /* 3.11 motion */
+  --dur-instant: 80ms; --dur-fast: 120ms; --dur-base: 180ms;
+  --dur-slow: 260ms; --dur-page: 320ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-inout: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* 3.12 z-index */
+  --z-sticky: 10; --z-popover: 100; --z-modal: 200; --z-toast: 300; --z-focus: 400;
+}
+
+/**
+ * Dark theme. Applied when the user has not explicitly chosen light, and the
+ * OS prefers dark. The `:not([data-theme="light"])` guard is what lets an
+ * explicit light choice win over the OS.
+ */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { color-scheme: dark; }
+  :root:not([data-theme="light"]) {
+    --bg-canvas: #14120F;
+    --bg-surface: #1B1815;
+    --bg-sunken: #100E0C;
+    --bg-inset: #201C18;
+    --bg-hover: #232019;
+    --bg-active: #2B2721;
+    --bg-selected: #182421;
+    --bg-scrim: rgba(0, 0, 0, 0.62);
+    --border-hairline: #2E2924;
+    --border-strong: #443D36;
+    --border-subtle: #241F1B;
+
+    --text-primary: #F2EDE6;
+    --text-secondary: #B8AEA3;
+    --text-tertiary: #8C8378;
+    --text-disabled: #5F574E;
+    --text-inverse: #F2EDE6;
+    --text-link: #6FB6A9;
+
+    --accent-50: #141F1D;
+    --accent-100: #172724;
+    --accent-200: #1D332F;
+    --accent-400: #4E9186;
+    --accent-600: #6FB6A9;
+    --accent-700: #8ACCC0;
+    --accent-solid: #24685F;
+    --accent-solid-hover: #2C7A70;
+    --accent-solid-text: #F2EDE6;
+
+    --sev-critical-fg: #F09083; --sev-critical-bg: #2A1B18; --sev-critical-border: #5E3229;
+    --sev-high-fg: #E9A366;     --sev-high-bg: #2A2016;     --sev-high-border: #5E4526;
+    --sev-medium-fg: #CDBA6A;   --sev-medium-bg: #24220F;   --sev-medium-border: #4F4726;
+    --sev-low-fg: #9FB0BE;      --sev-low-bg: #181B1E;      --sev-low-border: #3A424A;
+    --sev-info-fg: #6FB6A9;     --sev-info-bg: #172724;     --sev-info-border: #1D332F;
+
+    --diff-add-bg: #182319;
+    --diff-add-bg-emph: #22331F;
+    --diff-add-rule: #3E6B45;
+    --diff-add-marker: #8FC79A;
+    --diff-del-bg: #2A1B18;
+    --diff-del-bg-emph: #3A241F;
+    --diff-del-rule: #7A4438;
+    --diff-del-marker: #E89B8B;
+    --diff-gutter-fg: #5F574E;
+    --diff-hunk-bg: #231F1A;
+
+    --status-ok-fg: #7FC49A;   --status-ok-bg: #16231C;
+    --status-warn-fg: #E9A366; --status-warn-bg: #2A2016;
+    --status-err-fg: #F09083;  --status-err-bg: #2A1B18;
+    --status-idle-fg: #8C8378;
+
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.45);
+    --shadow-2: 0 8px 20px -8px rgba(0, 0, 0, 0.66), 0 1px 2px rgba(0, 0, 0, 0.5);
+  }
+}
+
+/* Explicit dark choice must win in both directions, so the block repeats. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg-canvas: #14120F;
+  --bg-surface: #1B1815;
+  --bg-sunken: #100E0C;
+  --bg-inset: #201C18;
+  --bg-hover: #232019;
+  --bg-active: #2B2721;
+  --bg-selected: #182421;
+  --bg-scrim: rgba(0, 0, 0, 0.62);
+  --border-hairline: #2E2924;
+  --border-strong: #443D36;
+  --border-subtle: #241F1B;
+
+  --text-primary: #F2EDE6;
+  --text-secondary: #B8AEA3;
+  --text-tertiary: #8C8378;
+  --text-disabled: #5F574E;
+  --text-inverse: #F2EDE6;
+  --text-link: #6FB6A9;
+
+  --accent-50: #141F1D;
+  --accent-100: #172724;
+  --accent-200: #1D332F;
+  --accent-400: #4E9186;
+  --accent-600: #6FB6A9;
+  --accent-700: #8ACCC0;
+  --accent-solid: #24685F;
+  --accent-solid-hover: #2C7A70;
+  --accent-solid-text: #F2EDE6;
+
+  --sev-critical-fg: #F09083; --sev-critical-bg: #2A1B18; --sev-critical-border: #5E3229;
+  --sev-high-fg: #E9A366;     --sev-high-bg: #2A2016;     --sev-high-border: #5E4526;
+  --sev-medium-fg: #CDBA6A;   --sev-medium-bg: #24220F;   --sev-medium-border: #4F4726;
+  --sev-low-fg: #9FB0BE;      --sev-low-bg: #181B1E;      --sev-low-border: #3A424A;
+  --sev-info-fg: #6FB6A9;     --sev-info-bg: #172724;     --sev-info-border: #1D332F;
+
+  --diff-add-bg: #182319;
+  --diff-add-bg-emph: #22331F;
+  --diff-add-rule: #3E6B45;
+  --diff-add-marker: #8FC79A;
+  --diff-del-bg: #2A1B18;
+  --diff-del-bg-emph: #3A241F;
+  --diff-del-rule: #7A4438;
+  --diff-del-marker: #E89B8B;
+  --diff-gutter-fg: #5F574E;
+  --diff-hunk-bg: #231F1A;
+
+  --status-ok-fg: #7FC49A;   --status-ok-bg: #16231C;
+  --status-warn-fg: #E9A366; --status-warn-bg: #2A2016;
+  --status-err-fg: #F09083;  --status-err-bg: #2A1B18;
+  --status-idle-fg: #8C8378;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.45);
+  --shadow-2: 0 8px 20px -8px rgba(0, 0, 0, 0.66), 0 1px 2px rgba(0, 0, 0, 0.5);
+}

@@ -1,0 +1,9 @@
+node_modules/
+dist/
+dist-preview/
+docs/
+.playwright-mcp/
+*.local
+.DS_Store
+release/
+store/

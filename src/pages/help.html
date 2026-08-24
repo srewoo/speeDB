@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>speeDB — Help</title>
+  <link rel="stylesheet" href="./page.css" />
+</head>
+<body>
+<main>
+  <div class="brand"><span>spee</span><i>DB</i></div>
+
+  <h1>Help</h1>
+  <p class="lede">
+    speeDB reads a repository, finds every database query in it, and proposes rewrites
+    that return the same results — then checks each suggestion back against the code it
+    came from before showing it to you.
+  </p>
+
+  <h2>Getting started</h2>
+  <ol>
+    <li><strong>Open the side panel.</strong> Click the speeDB icon in the toolbar. Use the
+      expand button in the top-right to open the same view in a full tab.</li>
+    <li><strong>Add credentials.</strong> Open <strong>Settings</strong> (the gear icon, top-right)
+      and pick an AI provider. Cloud providers need an API key; Chrome built-in AI needs nothing.</li>
+    <li><strong>Add a forge token.</strong> Under <em>GitHub &amp; GitLab</em>, paste a read-only
+      token and press <strong>Test connection</strong>. This is optional for public repositories
+      but strongly recommended — see the rate limits below.</li>
+    <li><strong>Paste a repository URL</strong> and press Scan. If you already have a
+      GitHub or GitLab page open, the field is filled in for you — including the branch.</li>
+  </ol>
+
+  <h2>Reading a report</h2>
+  <p>Findings are split into two groups that are never mixed:</p>
+  <table>
+    <tr><th>Group</th><th>What it means</th></tr>
+    <tr>
+      <td><strong>Same output</strong></td>
+      <td>The rewrite is asserted to return identical results. Each one carries an explicit
+        equivalence argument covering rows, columns, ordering, NULLs and duplicates.</td>
+    </tr>
+    <tr>
+      <td><strong>Changes behaviour</strong></td>
+      <td>A real improvement or bug fix that <em>does</em> alter what the query returns.
+        Often worth doing — but it is your decision, so it is kept separate.</td>
+    </tr>
+  </table>
+
+  <h3>The Verified badge</h3>
+  <p>
+    Every citation a finding makes — file path, line range, quoted schema — is re-checked
+    against the bytes actually fetched from your repository. A finding badged
+    <strong>Verified</strong> passed every check. One badged <strong>Needs check</strong>
+    is shown with the specific reasons listed at the top of its detail view.
+    Suggestions that cited files which do not exist are dropped entirely, and the count of
+    dropped suggestions is shown in the report header rather than hidden.
+  </p>
+
+  <div class="note">
+    <div>
+      <strong>Always read the equivalence argument.</strong>
+      <p>It is the claim the whole tool rests on. If it does not convince you, do not apply
+        the change — that is the argument doing its job.</p>
+    </div>
+  </div>
+
+  <h2>Databases and languages covered</h2>
+  <p>speeDB detects queries across relational, non-relational and analytical stores:</p>
+  <table>
+    <tr><th>Family</th><th>Engines</th></tr>
+    <tr><td>Relational</td><td>PostgreSQL, MySQL, MariaDB, SQL Server, Oracle, SQLite, Db2</td></tr>
+    <tr><td>Distributed SQL</td><td>CockroachDB, TiDB, YugabyteDB, Cloud Spanner, Vitess</td></tr>
+    <tr><td>Cloud warehouse</td><td>Snowflake, BigQuery, Redshift, Synapse, Databricks, Athena, ClickHouse</td></tr>
+    <tr><td>Big data / Hadoop</td><td>Hive, Spark SQL, Trino/Presto, Impala, HBase, MapReduce</td></tr>
+    <tr><td>Document</td><td>MongoDB, CouchDB, DynamoDB, Firestore, Cosmos DB</td></tr>
+    <tr><td>Wide column</td><td>Cassandra, ScyllaDB, Bigtable</td></tr>
+    <tr><td>Key-value / in-memory</td><td>Redis, Memcached, etcd, Hazelcast, Ignite</td></tr>
+    <tr><td>Graph</td><td>Neo4j (Cypher), Neptune (Gremlin/SPARQL), ArangoDB (AQL)</td></tr>
+    <tr><td>Search</td><td>Elasticsearch, OpenSearch, Solr</td></tr>
+    <tr><td>Vector</td><td>pgvector, Pinecone, Weaviate, Qdrant, Milvus, Chroma, FAISS</td></tr>
+    <tr><td>Time series</td><td>InfluxDB, TimescaleDB, Prometheus, Druid, QuestDB</td></tr>
+    <tr><td>Object / embedded</td><td>ObjectDB, Realm, DuckDB, RocksDB/LevelDB, TinyDB, shelve</td></tr>
+  </table>
+
+  <p>
+    Query sites are detected in JavaScript, TypeScript, Python, Java, Kotlin, Scala, Groovy,
+    Clojure, Go, Rust, C, C++, C#, F#, Ruby, PHP, Perl, Swift, Objective-C, Elixir, Erlang,
+    Dart, Lua, R and Julia, plus standalone <code>.sql</code>, <code>.hql</code>,
+    <code>.cql</code>, <code>.cypher</code> and <code>.prisma</code> files.
+  </p>
+
+  <div class="note">
+    <div>
+      <strong>Vector searches are a special case.</strong>
+      <p>Approximate nearest-neighbour search trades accuracy for speed. Changing
+        <code>ef_search</code>, <code>nprobe</code> or <code>topK</code> changes which
+        neighbours come back, so speeDB classifies every recall-affecting change as
+        behaviour-changing — never as a same-output optimisation.</p>
+    </div>
+  </div>
+
+  <h2>Autodetect from your current tab</h2>
+  <p>
+    With the side panel open, speeDB reads the address of the tab you are on. If it is a
+    repository page, the repository and branch are filled in automatically, and the field
+    keeps up as you browse.
+  </p>
+  <ul>
+    <li>A link to a single file is normalised back to the repository root.</li>
+    <li>Forge pages that are not repositories — dashboards, settings, the marketplace, owner
+      and group pages — are ignored.</li>
+    <li>Anything you type yourself is never overwritten.</li>
+  </ul>
+
+  <h2>Caching and rescanning</h2>
+  <p>
+    A finished scan is cached for <strong>60 minutes</strong>. The cache key is the commit
+    SHA plus the AI provider and model, so:
+  </p>
+  <ul>
+    <li>Scanning the same commit again is instant and costs no tokens.</li>
+    <li>A new commit never reuses an older commit's results.</li>
+    <li>Switching model or provider always produces a fresh analysis.</li>
+  </ul>
+  <p>To bypass the cache deliberately:</p>
+  <ul>
+    <li><strong>Scan fresh, ignoring cached results</strong> — under the Scan button.</li>
+    <li><strong>Rescan without cache</strong> — on a report that was served from cache.</li>
+    <li><strong>Clear cached scans</strong> — Settings &rarr; Appearance.</li>
+  </ul>
+  <p>
+    Cached reports are held in memory only, never written to disk, and disappear when
+    Chrome closes.
+  </p>
+
+  <h2>AI providers</h2>
+  <table>
+    <tr><th>Provider</th><th>Code leaves your device</th><th>Needs a key</th></tr>
+    <tr><td>Chrome built-in AI</td><td><strong>No</strong></td><td>No</td></tr>
+    <tr><td>Anthropic</td><td>Yes</td><td>Yes</td></tr>
+    <tr><td>OpenAI</td><td>Yes</td><td>Yes</td></tr>
+    <tr><td>Google Gemini</td><td>Yes</td><td>Yes</td></tr>
+  </table>
+  <p>
+    The model dropdown is populated by asking the provider what your key can actually use,
+    so new models appear without an extension update. If that request fails, speeDB falls
+    back to a built-in list and tells you why.
+  </p>
+  <p>
+    <strong>Reasoning models fix their own temperature.</strong> OpenAI's o-series and GPT-5
+    family reject a custom temperature outright, so speeDB omits the parameter for them and
+    disables the slider rather than letting every request fail. Your saved value is kept and
+    still applies to models that honour it.
+  </p>
+
+  <h2>Rate limits</h2>
+  <table>
+    <tr><th>Forge</th><th>Anonymous</th><th>With a token</th></tr>
+    <tr><td>GitHub</td><td>60 requests/hour</td><td>5,000 requests/hour</td></tr>
+    <tr><td>GitLab</td><td>Low, public projects only</td><td>Full read access within your plan's limits</td></tr>
+  </table>
+  <p>
+    A medium repository can use several hundred requests. <strong>Test connection</strong> on the
+    forge tab reports how much headroom the token has left, not just whether it works.
+  </p>
+
+  <h2>Keyboard</h2>
+  <table>
+    <tr><th>Key</th><th>Action</th></tr>
+    <tr><td><span class="kbd">↓</span> / <span class="kbd">j</span></td><td>Next finding</td></tr>
+    <tr><td><span class="kbd">↑</span> / <span class="kbd">k</span></td><td>Previous finding</td></tr>
+    <tr><td><span class="kbd">Home</span> / <span class="kbd">End</span></td><td>First / last finding</td></tr>
+    <tr><td><span class="kbd">Esc</span></td><td>Close the finding, or the export dialog</td></tr>
+  </table>
+
+  <h2>Troubleshooting</h2>
+  <h3>&ldquo;Repository not found&rdquo;</h3>
+  <p>Private repositories need a token with read access. On GitHub, a fine-grained token
+    must grant <strong>Contents: read</strong> for that specific repository.</p>
+
+  <h3>&ldquo;Rate limited&rdquo;</h3>
+  <p>Add a forge token in Settings. Without one, GitHub allows only 60 requests an hour
+    across all of your scanning.</p>
+
+  <h3>&ldquo;Repository is too large&rdquo;</h3>
+  <p>GitHub caps a single recursive tree listing at 100,000 entries. Scan a specific branch,
+    or a smaller repository.</p>
+
+  <h3>The scan appears stuck</h3>
+  <p>
+    It should not: every request times out after 30 seconds (90 for the initial file
+    listing) and retries, and <strong>Stop scan</strong> cancels requests already in flight.
+    A file that times out, is stored in Git LFS, or exceeds 512KB is skipped, and the count
+    of skipped files is shown next to the files-read counter and in the report header.
+  </p>
+
+  <h3>The scan stopped early</h3>
+  <p>It hit the token budget set in Settings. The report says how many passes did not run.
+    Raise the budget or narrow the scan.</p>
+
+  <h3>No findings at all</h3>
+  <p>This is a real result, not a failure. The header shows how many files were read and how
+    many query sites were found, so you can tell &ldquo;nothing to fix&rdquo; apart from
+    &ldquo;nothing was looked at&rdquo;.</p>
+
+  <footer>
+    <a href="./privacy.html">Privacy policy</a>
+    <span>speeDB</span>
+  </footer>
+</main>
+</body>
+</html>
