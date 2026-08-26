@@ -106,6 +106,22 @@ export function isOversized(res: Response): boolean {
   return Number.isFinite(len) && len > MAX_FILE_BYTES
 }
 
+/**
+ * The single-archive ingest could not be served, and why.
+ *
+ * A distinct type because the caller's response is specific: fall back to
+ * reading one file per request, and *say so*. Collapsing every cause to `null`
+ * meant a CORS block, an exhausted rate limit and "this endpoint has no archive"
+ * were indistinguishable — and the most expensive of them was happening on
+ * every GitHub scan without a word.
+ */
+export class ArchiveUnavailable extends Error {
+  constructor(reason: string) {
+    super(reason)
+    this.name = 'ArchiveUnavailable'
+  }
+}
+
 export function isScannable(path: string, size: number): boolean {
   if (size > MAX_FILE_BYTES) return false
   const lower = path.toLowerCase()

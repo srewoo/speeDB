@@ -1,6 +1,8 @@
 import type { Finding, ScanReport } from '@/core/types'
 
 import { toPatchFile } from './patch'
+import { LABELS } from '@/core/analyze/gate'
+import { describeEngineProfile } from '@/core/detect/engine-profile'
 
 export type ExportFormat = 'markdown' | 'json' | 'html' | 'patch'
 
@@ -42,6 +44,93 @@ export function exportReport(report: ScanReport, format: ExportFormat, findings?
   }
 }
 
+/**
+ * The coverage block.
+ *
+ * `1,115 query sites found` read as a thoroughness claim while a large share of
+ * those sites were `Object.keys()`, comments mentioning OpenSearch, and
+ * JavaScript string concatenation. These numbers degrade honestly instead: what
+ * matched, what was actually analysed, what was filtered and why, which files
+ * were capped, and what the repository says it connects to.
+ */
+function coverageLines(report: ScanReport): string[] {
+  const s = report.stats
+  const filtered = s.sitesFiltered.belowConfidence + s.sitesFiltered.lowPriority
+  const out = [
+    `**Coverage** ${s.filesFetched.toLocaleString()} files read · ` +
+      `${s.sitesMatched.toLocaleString()} sites matched` +
+      (s.sitesSampled > 0 ? ` (${s.sitesSampled.toLocaleString()} from whole-file samples)` : '') +
+      ` · ${s.sitesAnalysed.toLocaleString()} analysed` +
+      // A queue the budget never reached is not coverage.
+      (s.sitesQueued > s.sitesAnalysed
+        ? ` (of ${s.sitesQueued.toLocaleString()} queued — the token budget stopped the scan first)`
+        : '') +
+      ` · ` +
+      `${filtered.toLocaleString()} filtered ` +
+      `(below confidence ${s.sitesFiltered.belowConfidence.toLocaleString()} · ` +
+      `low priority ${s.sitesFiltered.lowPriority.toLocaleString()}) · ` +
+      `${s.chunksAnalysed} analysis passes  `,
+  ]
+
+  if (s.truncatedFiles.length > 0) {
+    const shown = s.truncatedFiles.slice(0, 5)
+    out.push(
+      `**Capped** ${s.truncatedFiles.length} file(s) had more query sites than the per-file cap: ` +
+        shown.map((t) => `\`${t.path}\` (${t.found} found, ${t.analysed} analysed)`).join(', ') +
+        (s.truncatedFiles.length > shown.length ? `, and ${s.truncatedFiles.length - shown.length} more` : '') +
+        '. The highest-priority sites in each were kept.  ',
+    )
+  }
+
+  if (s.triage) {
+    // The accounting, stated. A triage stage that flags almost nothing and a
+    // triage stage that flags almost everything both produce a bad report, and
+    // the ratio is the only warning you get before reading it.
+    const total = s.triage.flagged + s.triage.unsure + s.triage.clean
+    out.push(
+      `**Triage** ${total.toLocaleString()} site(s) triaged · ` +
+        `${s.triage.flagged.toLocaleString()} flagged · ` +
+        `${s.triage.unsure.toLocaleString()} unsure · ` +
+        `${s.triage.clean.toLocaleString()} clean` +
+        ` (${Math.round((100 * (s.triage.flagged + s.triage.unsure)) / Math.max(1, total))}% sent for write-up)  `,
+    )
+  }
+
+  if (report.authorLog && report.authorLog.unaccounted.length > 0) {
+    out.push(
+      `**Write-up gaps** ${report.authorLog.unaccounted.length.toLocaleString()} triaged site(s) were ` +
+        'neither written up nor explicitly declined. Those sites were examined and then dropped in ' +
+        'silence, so this report is missing whatever they contained.  ',
+    )
+  }
+
+  if (s.sitesUnaccounted > 0) {
+    out.push(
+      `**Triage gaps** ${s.sitesUnaccounted.toLocaleString()} site(s) came back from triage with no verdict ` +
+        'and were escalated to a full write-up rather than assumed clean. That is the safe direction, but a ' +
+        'scan with many of them is one whose triage stage is not answering reliably.  ',
+    )
+  }
+
+  if (report.engineProfile) {
+    out.push(`**Engines** ${describeEngineProfile(report.engineProfile)}  `)
+    if (report.engineProfile.ambiguous) {
+      out.push(
+        '> Several data stores are declared with equal authority, so no single engine ' +
+          'is assumed. Findings are labelled per query site from local dialect evidence.  ',
+      )
+    }
+  }
+
+  out.push(
+    `**Findings** ${report.findings.length} published` +
+      (report.suppressed.length ? ` · ${report.suppressed.length} suppressed` : '') +
+      (report.rejected.length ? ` · ${report.rejected.length} rejected in verification` : ''),
+  )
+
+  return out
+}
+
 export function toMarkdown(report: ScanReport, findings: Finding[]): string {
   const { repo, stats } = report
   const equivalent = findings.filter((f) => f.kind === 'equivalent')
@@ -52,7 +141,7 @@ export function toMarkdown(report: ScanReport, findings: Finding[]): string {
     '',
     `**Branch** \`${repo.ref}\` at \`${repo.commitSha.slice(0, 10)}\`  `,
     `**Scanned** ${new Date(report.createdAt).toLocaleString()} · ${report.provider}/${report.model}  `,
-    `**Coverage** ${stats.filesFetched} files read · ${stats.candidatesFound} query sites found · ${stats.chunksAnalysed} analysis passes`,
+    ...coverageLines(report),
     '',
   ]
 
@@ -106,7 +195,43 @@ export function toMarkdown(report: ScanReport, findings: Finding[]): string {
   }
 
   if (findings.length === 0) {
-    out.push('## No findings', '', 'No optimisable queries were identified in the scanned files.', '')
+    out.push(
+      '## No findings',
+      '',
+      `${stats.sitesAnalysed.toLocaleString()} query site(s) were analysed across ` +
+        `${stats.filesFetched.toLocaleString()} file(s). Nothing here reduces a round trip, a scan or ` +
+        'a fetch without changing output. That is a good outcome, not an empty one.',
+      '',
+    )
+  }
+
+  if (report.suppressed.length > 0) {
+    // Held back, not hidden. A gate that silently eats a true positive is worse
+    // than the padding it removes, and the only way to know which it did is to
+    // be able to read what it held back.
+    const byReason = new Map<string, Finding[]>()
+    for (const f of report.suppressed) {
+      const key = f.suppression?.reason ?? 'other'
+      byReason.set(key, [...(byReason.get(key) ?? []), f])
+    }
+
+    out.push(
+      '## Suppressed before publication',
+      '',
+      `${report.suppressed.length} finding(s) were held back by the value gate. They are listed here ` +
+        'in full so the gate can be argued with — none of them was silently dropped.',
+      '',
+    )
+    for (const [reason, list] of byReason) {
+      out.push(`### ${LABELS[reason as keyof typeof LABELS] ?? reason} — ${list.length}`, '')
+      for (const f of list) {
+        out.push(
+          `- **${f.title}** — \`${f.primaryOccurrence.file}:${f.primaryOccurrence.startLine}\``,
+          `  ${f.suppression?.detail ?? ''}`,
+        )
+      }
+      out.push('')
+    }
   }
 
   if (report.rejected.length > 0) {

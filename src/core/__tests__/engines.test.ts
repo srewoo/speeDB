@@ -49,7 +49,9 @@ const CASES: [string, string, string][] = [
   ['milvus', 'vec.py', 'from pymilvus import Collection\ncollection.search(param={"nprobe": 16})'],
   ['influxdb', 'q.flux', 'from(bucket: "metrics") |> range(start: -1h)'],
   ['timescaledb', 'q.sql', 'SELECT time_bucket(\'5m\', ts), avg(v) FROM readings GROUP BY 1'],
-  ['prometheus', 'rules.txt', 'histogram_quantile(0.99, rate(http_duration_bucket{job="api"}[5m]))'],
+  // `rules.yml`, not `rules.txt`: Prometheus rule files are YAML, and `.txt` is
+  // now treated as prose (a changelog produced 40 phantom query sites).
+  ['prometheus', 'rules.yml', 'histogram_quantile(0.99, rate(http_duration_bucket{job="api"}[5m]))'],
   ['duckdb', 'load.py', 'duckdb.sql("SELECT * FROM read_parquet(\'s3://b/*.parquet\')")'],
   ['rocksdb', 'store.go', 'it := db.NewIterator(ro)\ndefer it.Close()'],
 ]

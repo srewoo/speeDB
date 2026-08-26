@@ -6,6 +6,8 @@ export interface Settings {
   temperature: number
   maxOutputTokens: number
   scanTokenBudget: number
+  /** Query sites per analysis pass. Small on purpose — see DEFAULTS. */
+  sitesPerPass: number
   theme: 'system' | 'light' | 'dark'
 }
 
@@ -23,6 +25,7 @@ export const DEFAULT_SETTINGS: Settings = {
   temperature: DEFAULTS.temperature,
   maxOutputTokens: DEFAULTS.maxOutputTokens,
   scanTokenBudget: DEFAULTS.scanTokenBudget,
+  sitesPerPass: DEFAULTS.sitesPerPass,
   theme: 'system',
 }
 

@@ -32,9 +32,11 @@ function report(id: string): ScanReport {
     repo: { forge: 'github', apiOrigin: '', owner: 'o', name: 'r', ref: 'main', commitSha: id },
     createdAt: new Date().toISOString(),
     provider: 'anthropic', model: 'claude-sonnet-5',
-    findings: [], rejected: [],
+    findings: [], rejected: [], suppressed: [],
     stats: {
       filesInTree: 1, filesFetched: 1, filesSkipped: 0, ingest: 'archive', apiCalls: 3, candidatesFound: 0,
+      sitesMatched: 0, sitesSampled: 0, sitesQueued: 0, sitesAnalysed: 0,
+      sitesFiltered: { belowConfidence: 0, lowPriority: 0 }, sitesUnaccounted: 0, truncatedFiles: [],
       chunksAnalysed: 0, chunksReused: 0, promptTokens: 0, completionTokens: 0, elapsedMs: 1,
     },
   }

@@ -20,6 +20,9 @@ export const MOCK_REPORT: ScanReport = {
   },
   stats: {
     filesInTree: 412, filesFetched: 268, filesSkipped: 0, ingest: 'archive', apiCalls: 3, candidatesFound: 47,
+    sitesMatched: 131, sitesSampled: 0, sitesQueued: 47, sitesAnalysed: 47,
+    sitesFiltered: { belowConfidence: 62, lowPriority: 22 },
+    sitesUnaccounted: 0, truncatedFiles: [{ path: 'src/api/reports.ts', found: 48, analysed: 40 }],
     chunksAnalysed: 6, chunksReused: 0, promptTokens: 162_840, completionTokens: 21_480, elapsedMs: 96_400,
   },
   schema: {
@@ -33,6 +36,7 @@ export const MOCK_REPORT: ScanReport = {
       'Index bloat, and whether an existing index is used at all.',
     ],
   },
+  suppressed: [],
   rejected: [
     {
       id: 'r1', kind: 'equivalent', title: 'Add covering index on share_v1.meeting_id',

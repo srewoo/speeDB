@@ -1,5 +1,6 @@
 import { equivalenceNotesFor } from '@/config/engines'
 import type { Candidate, RepoFile } from '@/core/types'
+import { describeScope } from '@/core/detect/scope'
 
 export const SYSTEM_PROMPT = `You are a senior database engineer reviewing a real codebase.
 
@@ -69,6 +70,29 @@ Spark join that should be broadcast; an InfluxDB query with no time range.
 
 Do NOT report: style preferences, naming, formatting, or "consider adding a comment".
 
+## Read the enclosing scope — it decides whether a finding is worth reporting
+Each query site states its enclosing scope: the nearest function or method, how many
+loops enclose it, and what reaches it.
+
+- When a site says \`inside N loops\`, the first question to answer is whether it issues
+  one query per iteration. That is the highest-value finding this tool can produce, and
+  you should look for it before anything else.
+- When a site says \`reached by: migration\` or \`reached by: test\`, it runs once at install
+  time or never in production. Do not report a performance finding there unless the query
+  is also incorrect. Say so in one line and move on.
+- Do not report a finding as \`n-plus-one\` when the site says \`not in a loop\`. If the
+  repetition comes from somewhere you cannot see, say that in "assumptions" and pick a
+  category you can support.
+
+## A proposal must be different, and it must go the right way
+- Never return a \`proposed\` block that is the same code as \`original\`. If there is
+  nothing to change, there is no finding.
+- If your rewrite issues the same number of database calls as the original, or more, it
+  is not a round-trip finding. Count the calls on both sides before you claim otherwise.
+- If the code you are looking at makes no request to any data store — string building,
+  URL assembly, template rendering, in-memory list work — it is not in scope. Return
+  nothing for it.
+
 ## Output
 Return ONE JSON object, no markdown fence, no prose before or after:
 {"findings":[ ... ]}
@@ -91,7 +115,7 @@ Each finding:
     "equivalenceArgument": "address rows, columns, ordering, NULLs, duplicates explicitly",
     "assumptions": ["anything that must be true for this to be safe"],
     "expectedImpact": "concrete, e.g. '1 round trip instead of N' or 'one cached plan instead of four'",
-    "requiredMigration": "DDL that must run first, or omit"
+    "requiredMigration": "the CREATE INDEX or ALTER TABLE statement that must run first. OMIT THIS KEY ENTIRELY if there is none — do not write \"omit\", \"none\" or \"N/A\" as its value"
   },
   "evidence": [{"kind":"schema"|"migration"|"index-definition"|"model-definition"|"call-site"|"config","file":"...","startLine":N,"endLine":N,"quote":"verbatim","relevance":"one sentence"}],
   "modelConfidence": 0.0-1.0
@@ -136,13 +160,18 @@ export function buildUserPrompt(input: ChunkInput): string {
     '# Query sites to review\n' +
       'Line numbers are the real line numbers in each file. Cite them exactly.\n' +
       input.candidates
-        .map(
-          (c) =>
-            `\n## FILE: ${c.file}  (lines ${c.startLine}-${c.endLine}, detected as ${c.engine}/${c.accessStyle})\n` +
+        .map((c) => {
+          // The scope line is what makes the `n-plus-one` category reachable:
+          // six context lines cannot show a `for` nine lines above, and the
+          // excerpt's elided loop-header prefix only shows it, never names it.
+          const scopeLine = c.scope ? `\n   ${describeScope(c.scope)}` : ''
+          return (
+            `\n## FILE: ${c.file}  (lines ${c.startLine}-${c.endLine}, detected as ${c.engine}/${c.accessStyle})${scopeLine}\n` +
             '```\n' +
             withLineNumbers(c.excerpt, Math.max(1, c.startLine - 6)) +
-            '\n```',
-        )
+            '\n```'
+          )
+        })
         .join('\n'),
   )
 

@@ -1,5 +1,5 @@
 import { useMemo, useRef } from 'react'
-import type { Finding } from '@/core/types'
+import type { Finding, ScanReport } from '@/core/types'
 import { groupFindings, useApp, visibleFindings } from '@/store/app-store'
 import {
   EngineChip, EquivalenceChip, GroundingChip, KindChip, PerformanceChip,
@@ -41,9 +41,14 @@ export function ReportScreen({ onOpenExport }: { onOpenExport: () => void }) {
             {report.stats.filesSkipped
               ? ` (${report.stats.filesSkipped.toLocaleString()} unreadable, skipped)`
               : ''} ·{' '}
-            {report.stats.candidatesFound.toLocaleString()} query sites ·{' '}
+            {/* Matched vs analysed, not one number pretending to be both: a raw
+                match count read as a thoroughness claim while much of it was
+                Object.keys() and comments mentioning a search engine. */}
+            {report.stats.sitesMatched.toLocaleString()} sites matched,{' '}
+            {report.stats.sitesAnalysed.toLocaleString()} analysed ·{' '}
             {report.model} · {Math.round(report.stats.elapsedMs / 1000)}s
           </p>
+          <CoverageNote report={report} />
         </header>
 
         {report.cache ? (
@@ -101,8 +106,29 @@ export function ReportScreen({ onOpenExport }: { onOpenExport: () => void }) {
             label="Verified"
             tone="var(--status-ok-fg)"
           />
+          <StatTile value={report.suppressed.length} label="Suppressed" tone="var(--text-tertiary)" />
           <StatTile value={report.rejected.length} label="Dropped" tone="var(--text-tertiary)" />
         </div>
+
+        {report.suppressed.length > 0 ? (
+          <details className="callout">
+            <summary className="t-body-sm" style={{ cursor: 'pointer' }}>
+              <strong>{report.suppressed.length} finding{report.suppressed.length === 1 ? '' : 's'} held
+              back</strong> before publication — expand to review them
+            </summary>
+            <ul className="stack-2" style={{ marginTop: 10 }}>
+              {report.suppressed.map((f) => (
+                <li key={f.id} className="stack-1">
+                  <span className="t-body-sm">{f.title}</span>
+                  <span className="t-caption dim2 nums">
+                    {f.primaryOccurrence.file}:{f.primaryOccurrence.startLine}
+                  </span>
+                  <span className="t-caption dim">{f.suppression?.detail}</span>
+                </li>
+              ))}
+            </ul>
+          </details>
+        ) : null}
 
         {report.rejected.length > 0 ? (
           <p className="t-caption dim2">
@@ -192,7 +218,7 @@ export function ReportScreen({ onOpenExport }: { onOpenExport: () => void }) {
           </p>
           <p className="t-body-sm dim">
             {report.findings.length === 0
-              ? `speeDB read ${report.stats.filesFetched} files and found ${report.stats.candidatesFound} query sites, none of which had a safe optimisation worth reporting.`
+              ? `speeDB read ${report.stats.filesFetched} files and analysed ${report.stats.sitesAnalysed} query sites. Nothing here reduces a round trip, a scan or a fetch without changing output — that is a good outcome, not an empty one.`
               : 'Try clearing the search box or re-enabling a severity.'}
           </p>
         </div>
@@ -297,4 +323,49 @@ function formatAge(ms: number): string {
   const hours = Math.floor(mins / 60)
   const rest = mins % 60
   return rest ? `${hours} hr ${rest} min` : `${hours} hr`
+}
+
+/**
+ * What was filtered, what was capped, and what the repository says it connects
+ * to. Silence on any of the three reads as a claim to have covered everything.
+ */
+function CoverageNote({ report }: { report: ScanReport }) {
+  const s = report.stats
+  const filtered = s.sitesFiltered.belowConfidence + s.sitesFiltered.lowPriority
+  const engines = report.engineProfile?.declared ?? []
+  if (filtered === 0 && s.truncatedFiles.length === 0 && engines.length === 0) return null
+
+  return (
+    <details className="stack-1" style={{ marginTop: 6 }}>
+      <summary className="t-caption dim2" style={{ cursor: 'pointer' }}>
+        Coverage and engine detection
+      </summary>
+      <ul className="stack-1" style={{ marginTop: 6 }}>
+        {filtered > 0 ? (
+          <li className="t-caption dim nums">
+            — {filtered.toLocaleString()} matched sites were filtered before analysis:{' '}
+            {s.sitesFiltered.belowConfidence.toLocaleString()} below the confidence floor,{' '}
+            {s.sitesFiltered.lowPriority.toLocaleString()} below the per-file priority cap.
+          </li>
+        ) : null}
+        {s.truncatedFiles.map((t) => (
+          <li key={t.path} className="t-caption dim nums">
+            — <code>{t.path}</code> had {t.found} query sites; the {t.analysed} highest-priority
+            were analysed.
+          </li>
+        ))}
+        {engines.map((d) => (
+          <li key={`${d.engine}-${d.source}`} className="t-caption dim">
+            — <strong>{d.engine}</strong> declared in <code>{d.source}</code>: <code>{d.quote}</code>
+          </li>
+        ))}
+        {engines.length === 0 ? (
+          <li className="t-caption dim">
+            — No data store is declared in any configuration file, dependency manifest or compose
+            file, so engine labels come from local evidence at each query site only.
+          </li>
+        ) : null}
+      </ul>
+    </details>
+  )
 }

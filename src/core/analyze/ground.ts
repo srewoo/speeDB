@@ -1,5 +1,6 @@
 import type { Evidence, Finding, QueryOccurrence } from '@/core/types'
 import { sliceLines } from '@/core/detect/scan'
+import { analyseScope, type EnclosingScope } from '@/core/detect/scope'
 import { checkEquivalence } from './equivalence'
 import { checkPerformance } from './performance'
 import { checkProposedIndex, type SchemaFacts } from './schema-facts'
@@ -35,6 +36,12 @@ export function groundFindings(findings: Finding[], input: GroundingInput): {
     const notes: string[] = []
     let fatal = false
 
+    // The enclosing scope is recomputed from the fetched file rather than taken
+    // from the model. `triggeredBy` and `enclosingSymbol` are the model's claims
+    // about the call path; this is the file's own answer, and it is what the
+    // severity ceiling and the cold-path rule are allowed to rest on.
+    const scope = scopeFor(finding.primaryOccurrence.file, finding.primaryOccurrence.startLine, input.files)
+
     // 1. The primary occurrence must point at a file we actually read.
     const occResult = checkOccurrence(finding.primaryOccurrence, input.files)
     notes.push(...occResult.notes)
@@ -64,13 +71,28 @@ export function groundFindings(findings: Finding[], input: GroundingInput): {
       }
     }
 
+    // Everything above this line is a citation check: the cited file, the quoted
+    // original, the evidence quotes. Everything below is *analysis* — what the
+    // equivalence checker could decide, whether the model's prose covered the
+    // usual dimensions, what the scope says. Only the first kind can make a
+    // citation unconfirmed.
+    //
+    // Taking this count at the end instead conflated them, and the consequence
+    // was not cosmetic: predicate equivalence is undecidable on every ORM
+    // rewrite, so every ORM finding acquired an "undecidable" note, was marked
+    // `needs-verification`, had its severity capped at `low`, and was reported
+    // to the user as "one or more citations could not be confirmed" — which was
+    // false. Across 27 findings in three real runs, not one came out above
+    // `low`.
+    const citationNotes = notes.length
+
     // 4. Machine-check the same-output claim against the queries themselves.
     //
     //    This replaces what used to be a length threshold on the model's prose.
     //    A long argument is not a correct one; the only honest options are to
     //    check a property or to say it was not checked.
     let kind = finding.kind
-    const equivalence = checkEquivalence(finding.original, finding.suggestion.proposed)
+    const equivalence = checkEquivalence(finding.original, finding.suggestion.proposed, scope)
 
     if (finding.kind === 'equivalent') {
       const hard = equivalence.deltas.filter((d) => d.severity === 'hard')
@@ -119,6 +141,7 @@ export function groundFindings(findings: Finding[], input: GroundingInput): {
       original: finding.original,
       proposed: finding.suggestion.proposed,
       requiredMigration: finding.suggestion.requiredMigration,
+      scope,
     })
 
     // 7. An index proposal is checked against what the repository declares.
@@ -138,15 +161,32 @@ export function groundFindings(findings: Finding[], input: GroundingInput): {
       }
     }
 
+    // A category the file contradicts is worth saying out loud: the model called
+    // it an N+1 and the query is not in a loop, or it is in one and the model
+    // never noticed. Neither is fatal, and both are checkable.
+    if (scope) {
+      if (finding.category === 'n-plus-one' && scope.loopDepth === 0) {
+        notes.push(
+          'Reported as an N+1, but the query is not inside a loop in the fetched source. One of those is wrong, and only one of them was checked.',
+        )
+      }
+      if (scope.trigger === 'migration' || scope.trigger === 'test') {
+        notes.push(
+          `This code is reached by a ${scope.trigger === 'test' ? 'test' : 'migration or seed'}, so it runs once at install time or never in production.`,
+        )
+      }
+    }
+
     const grounded: Finding = {
       ...finding,
       kind,
+      scope,
       equivalence,
       performance,
       indexAdvice,
       evidence: verifiedEvidence,
       groundingNotes: notes,
-      grounding: fatal ? 'rejected' : notes.length === 0 ? 'verified' : 'needs-verification',
+      grounding: fatal ? 'rejected' : citationNotes === 0 ? 'verified' : 'needs-verification',
     }
 
     if (fatal) rejected.push(grounded)
@@ -251,4 +291,23 @@ function missingDimensions(argument: string): string[] {
     ['NULL or duplicate handling', /\bnull\b|\bduplicat/],
   ]
   return dimensions.filter(([, re]) => !re.test(text)).map(([label]) => label)
+}
+
+/**
+ * Recompute the enclosing scope from the file we actually fetched.
+ *
+ * Returns undefined when the file is missing or the line is out of range —
+ * those are already fatal or noted above, and inventing a scope for them would
+ * let the severity ceiling rest on nothing.
+ */
+function scopeFor(
+  path: string,
+  startLine: number,
+  files: Map<string, string>,
+): EnclosingScope | undefined {
+  const source = files.get(path)
+  if (!source || startLine < 1) return undefined
+  const lines = source.split('\n')
+  if (startLine > lines.length) return undefined
+  return analyseScope(path, lines, startLine)
 }

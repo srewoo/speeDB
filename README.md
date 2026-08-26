@@ -94,19 +94,82 @@ machine check, not taken on the model's word.
 ## Pipeline
 
 ```
-ingest ──────► detect ──────► analyse ──────► ground
- 1 archive     regex rules     LLM, only on    citations re-checked;
- request       zero cost       candidates      SQL compared structurally
+ingest ──► profile ──► detect ──────► analyse ──► ground ──────► gate
+1 archive  what the   rules on       LLM, only   citations      worthless
+request    repo says  masked source, on ranked   re-checked;    findings held
+           it uses    ranked by      candidates  queries        back with a
+                      priority                   compared       stated reason
 ```
 
 **Ingest is one request.** The whole repository arrives as a single gzipped
 tarball, gunzipped in the browser via `DecompressionStream` and parsed by a
-small TAR reader. The naive one-request-per-file approach costs 2,000 of
+small TAR reader. Two hosts are needed for this on GitHub, not one: the tarball
+endpoint on `api.github.com` answers with a 302 to `codeload.github.com`, and a
+redirect to an ungranted host is a CORS failure. Both are in `host_permissions`.
+When the archive request does fail the scan still completes via the per-file
+path, and now says which and why — that fallback costs three orders of magnitude
+more API calls, so a silent one is a bug rather than a graceful degradation. The naive one-request-per-file approach costs 2,000 of
 GitHub's 5,000/hour budget on a 2,000-file repo, which makes a second scan
 impossible. Per-file reads remain as a fallback when the archive endpoint
 cannot serve.
 
+**The engine profile is read once, before detection.** A repository states its
+data stores in a handful of well-known files — `settings.py`, `database.yml`,
+`application.properties`, `schema.prisma`, `package.json`, `go.mod`,
+`docker-compose.yml` — and those statements are facts rather than guesses.
+Without that prior, engine labelling falls back to whichever regex shouted
+loudest, and a Django/MySQL project acquires MongoDB, Hive, BigQuery, Redshift
+and OpenSearch findings for stores it has never connected to. A genuine dialect
+marker (`ON CONFLICT`, `ROWNUM`, `PREWHERE`) is evidence about *that statement*
+and still wins outright; engine *vocabulary* does not. The profile is printed in
+the report header, with the file and line that declared it, so a wrong inference
+is visible rather than silent.
+
+**Analysis passes are small, on a hypothesis rather than a measurement.** The
+reasoning is that a model asked to review 290 code excerpts in one response
+skims where one asked to review 25 reads, so `sitesPerPass` defaults to 25. Five
+runs over the same repository with the same model at temperature 0 found the two
+known high-severity defects 0, 0, 2, 2 and 0 times — and the successes and
+failures span both large and small pass sizes. Run-to-run variance swamped the
+configuration effect, so this is a considered default and not a proven one.
+
 **Detect is deterministic and free**, and runs in two tiers.
+
+*Only files that can hold a query are read.* Two filters, at different stages.
+At ingest: images, PDFs, video, fonts, archives, binaries, lockfiles,
+`node_modules/`, `vendor/`, `dist/`, and anything over 512 KB. At detection:
+prose (`md`, `rst`, `po`, `csv`), stylesheets, translation catalogues, build
+wrappers, and files with no extension at all. `.yml` and `.json` are deliberately
+*not* excluded — a dbt model or a Liquibase changelog is a real query — and
+`Rakefile` and `Gemfile` are kept because they are Ruby. Across five real
+repositories this leaves 8 candidates in irrelevant file types out of 13,762.
+
+*Rules match masked source.* Comments are blanked for every rule — a comment is
+never a query, and `# TODO: migrate to opensearch` used to set the engine for
+the whole span it sat in. String bodies stay visible by default, because a SQL,
+CQL or Cypher statement lives inside a string literal by definition; the rules
+that match a bare engine *name* opt out of seeing them. Masking replaces
+interiors with spaces of equal length, so every character offset — and therefore
+every line number — is preserved exactly.
+
+*Candidates are ranked before they are capped, and the two signals are
+different.* `confidence` answers "is this a query?" and is what the floor gates
+on. `priority` answers "is this likely to matter?" — a query inside a loop in a
+request handler outranks everything; code in a migration, seed or test outranks
+nothing. The per-file cap applies to priority. Capping by line order instead
+meant that in a file whose cheap queries sit at the top and whose expensive
+report view sits at the bottom — the normal shape of a large `views.py` — the
+cap systematically discarded the interesting half. When the cap does bite, the
+report names the file and says how many sites it kept.
+
+*Every candidate carries its enclosing scope.* Loop nesting, the nearest
+enclosing symbol, and what triggers the path — read lexically, by indentation
+for Python/Ruby/Elixir and by brace balance for everything else. Without it a
+query at module scope and a query inside a triple-nested loop reached the model
+as the same shape of evidence, six lines of context wide, so a `for` nine lines
+above was invisible and the N+1 category was unreachable except by luck. The
+loop headers are prepended to the excerpt as an elided prefix rather than
+widening the context window for every candidate.
 
 *Tier one* matches query text. Rules are precision-first: a bare `.find(` would
 match every `Array.prototype.find` in a TypeScript repo, so the MongoDB rule
@@ -156,6 +219,101 @@ Clojure, Go, Rust, C/C++, C#, F#, Ruby, PHP, Perl, Swift, Objective-C, Elixir,
 Erlang, Dart, Lua, R and Julia, plus `.sql`, `.hql`, `.cql`, `.cypher`,
 `.flux` and `.prisma` files.
 
+## Most data access is not SQL text
+
+`readSqlShape()` reads statements. Django, Rails, Hibernate, Prisma, SQLAlchemy,
+GORM, EF Core, Sequelize and TypeORM are not statements, and for a long time
+every one of them fell into a dead branch: *"Not machine-checkable — non-SQL
+engine or unsupported syntax."* The two best checks in the product were switched
+off exactly where most users need them, and the performance block degraded to
+offering `EXPLAIN ANALYZE` against JavaScript string concatenation.
+
+`readOrmShape()` is the same idea one level up. It does not try to understand the
+query; it counts round trips and compares projections, and both are decidable
+from text:
+
+| Property | Decidable on ORM code? | How |
+| --- | --- | --- |
+| projection | yes | compare `values()` / `only()` / `select` / `pluck` field lists |
+| duplicate handling | yes | `.distinct()` on both sides |
+| row ordering | yes | `.order_by()` / `.order()` / `orderBy` present and identical |
+| row limit | yes | slice, `.limit()`, `take` |
+| result cardinality | yes | the terminal op (`count` / `first` / `all`) unchanged |
+| predicate equivalence | **no** | undecidable — reported as undecided, never as verified |
+| N+1 → batch rewrite | partly | the row set is provably the union; the caller's read of it is the named guard |
+
+So a report that used to say "not measured, not machine-checkable" thirteen times
+now says *"issues 1 database call where the original issues 2, counted from the
+code, not measured"*. The honesty framing is untouched: still a count, never a
+timing, and still labelled as one.
+
+And the verification step is the instrument that fits the stack —
+`CaptureQueriesContext` for Django, `assert_queries` for ActiveRecord,
+`log: ['query']` for Prisma, `Statistics.getQueryExecutionCount()` for
+Hibernate. `EXPLAIN` is never offered for something you cannot run it against.
+
+## Analysis is two stages, and the first one has to account for everything
+
+A single request that both decides what is a problem and writes it up produced
+about three and a half findings per pass regardless of how many sites the pass
+contained, and missed defects sitting at the top of its own input. Nothing in
+the contract required it to say anything about a given site, so skipping one was
+free and invisible.
+
+**Triage** returns one verdict per site — `problem`, `clean` or `unsure` — at
+roughly thirty tokens each, and the parser reconciles the response against the
+ids that were sent. A site nobody answered for is escalated, never assumed
+clean; an invented id is reported rather than trusted. Accounting for a hundred
+sites costs less than writing three findings did.
+
+**Authoring** runs only on flagged sites, a few at a time, with the triage
+reason already stated and the full schema for grounding. It is explicitly
+allowed to disagree — an accounting contract that turns into a quota is how a
+report fills up with findings nobody needed.
+
+Triage can also be **sampled**: run it three times and take the union of what is
+flagged. Run-to-run variance was the largest single term in the measurements —
+the same configuration found 0 and 2 of the same two defects on different runs —
+and triage output is small enough that three samples cost less than one
+authoring request. Default is one; nobody pays for it unasked.
+
+## The value gate
+
+Grounding proves the citations are real. It says nothing about whether a finding
+is worth reading, and five kinds of worthless survived it untouched:
+
+| Reason | What it catches |
+| --- | --- |
+| `no-op` | `proposed` is identical to `original` once whitespace is collapsed |
+| `wrong-direction` | a round-trip claim whose rewrite issues no fewer queries |
+| `not-data-access` | neither side parses as a statement or as ORM data access |
+| `cold-path` | a pure performance claim in a migration, seed or test |
+| `unsupported-assumption` | a stated assumption the file itself contradicts, cited by line |
+| `immaterial` | a column narrowing on a query that runs once, with nothing else behind it |
+| `invented-symbol` | the proposal accesses a name that appears nowhere in the repository, so it would fail at runtime |
+
+Severity is then **derived from evidence, in both directions** — not clamped.
+A ceiling was not enough: across 27 findings from three real runs, not one came
+out above `low`, because the model rated almost everything `low` and a ceiling
+can only agree. The inputs are all things the tool computed and can defend — the
+trigger and loop depth read from the fetched file, the structural facts counted
+from the two versions. A query that runs once per iteration on a request path is
+`high`; anything in a migration or a test is `info`. The model's own rating is
+kept as `modelSeverity`, beside the answer rather than in it.
+
+Recomputed over those 27 findings, the distribution went from `info 5, low 22` to
+`high 7, medium 9, low 8, info 3`, and all five findings touching a
+human-verified defect moved out of `low`. Reading only the `high` band gives 3 of
+7 real, against 4 of 23 reading everything.
+
+Suppressed findings are **kept, with their reason**, and rendered in a collapsed
+section of the report. A gate that silently eats a true positive is worse than
+the padding it removes, and the only way to know which it did is to be able to
+read what it held back.
+
+An empty report is stated as the good outcome it usually is, rather than as an
+absence.
+
 ## AI backends
 
 | Provider | Code leaves device | Needs a key |
@@ -202,8 +360,19 @@ A token budget is not informed consent — a token count means nothing at the
 moment someone pastes an API key. Between detection and the first paid request,
 speeDB shows the estimated tokens and dollars and waits for a decision. Input
 tokens are known exactly (the prompts are already built); output is projected,
-and labelled as a projection. A model with no published price shows a token
+and labelled as a projection. A model with no listed price shows a token
 estimate and no dollar figure — a confident wrong number is worse than none.
+
+No provider exposes prices in an API, so `src/config/pricing.ts` is a table, and
+a table goes stale. Two consequences are handled explicitly. It carries
+`PRICES_VERIFIED_ON`, shown next to every figure, and that date means *last
+checked against the provider's pricing page* — not last edited. And the lookup
+refuses a prefix match whose remainder is anything other than a date or a
+channel, because the cheap variants extend their parent's id: `gpt-4o-mini`
+matching `gpt-4o` quoted $2.50/$10 for a model that costs $0.15/$0.60, sixteen
+times over, presented as a fact. `mini`, `nano` and `lite` can no longer be
+absorbed into a prefix; an unlisted model falls back to "no price", which is the
+designed outcome rather than a failure.
 
 The gate does not appear for on-device runs or for scans that are entirely
 cache hits.
@@ -265,7 +434,7 @@ them. Opting into disk storage is a single explicit toggle that says so.
 npm install
 npm run dev            # then load dist/ as an unpacked extension
 npm run build
-npm test               # 292 tests, including end-to-end runScan and the provider adapters
+npm test               # 559 tests, including end-to-end runScan and the provider adapters
 npm run check:cycles   # circular value imports become runtime TDZ errors
 
 npm run package        # build + release/speedb-<version>.zip for the Web Store
@@ -303,6 +472,44 @@ npx http-server dist-preview      # preview.html?screen=report|detail|settings|c
                                   # &surface=panel  &theme=dark
 ```
 
+## The benchmark
+
+A fix is only real if it moves a number, so `bench/` defines the numbers: five
+repositories spanning the access styles that break detection in different ways,
+plus a negative control with no data layer that must report zero findings in
+words.
+
+```sh
+npm run bench:pin                                    # pin every repo to a SHA
+npm run bench:detect -- --repo mt-test-studio --path ~/src/mt-test-studio
+npm run bench -- --repo mt-test-studio --no-llm       # free: detection metrics only
+npm run bench                                        # full, needs a scan + an audit
+```
+
+Ground truth is a Claude audit of the same commit, blind to speeDB's output
+(`bench/AUDIT_PROMPT.md`), human-adjudicated where the two disagree. Every metric
+carries a gate, and `npm run bench` exits non-zero when one fails.
+
+`--no-llm` scores **candidate coverage**, **engine accuracy** and **cold-path
+share** without spending a token, because all three are decided before the model
+runs. Candidate coverage is the one to watch first: it isolates detection from
+the model entirely, and if a real N+1 never becomes a candidate then no prompt
+change can recover it and every other metric is downstream of it.
+
+Two things cannot be synthesised — a pinned commit and a human-adjudicated audit
+of it — so `bench/score.mjs` refuses to report a green run without both, and says
+which is missing. An unscored benchmark is not a passing one.
+
+All six repositories are pinned and run; two are scored against a truth file. Over 953 real files, candidate coverage
+went from **0/3 to 3/3** and engine accuracy from ~60% to **100%**; 195
+candidates in changelogs and translation catalogues went to zero, and so did the
+16 candidates labelled with a store the repository has never connected to. The
+run also found three precision defects no fixture would have — prose files
+consuming a fifth of the analysis budget, docstrings feeding English to the
+dialect rules, and case-insensitive SQL keywords matching ordinary sentences.
+`real-repo-precision.test.ts` holds the regressions, using the verbatim strings
+that caused them.
+
 ## Docs
 
 | File | Contents |
@@ -310,6 +517,8 @@ npx http-server dist-preview      # preview.html?screen=report|detail|settings|c
 | `docs/PRD.md` | Problem, personas, 80+ numbered functional requirements, roadmap |
 | `docs/TRD.md` | Architecture, ingestion, provider adapters, schemas, validator |
 | `docs/UI-SPEC.md` | Design tokens, all 7 screens at both densities, a11y |
+| `fix.md` | The reproduced failure that motivated the ranking, scope, engine-profile, ORM-shape and gate work, and the benchmark that measures it |
+| `bench/README.md` | How to pin, audit, run and score the benchmark |
 
 Help and the privacy policy ship inside the extension (`src/pages/`), reachable
 from the footer on every screen. They are extension pages, not web-accessible
@@ -328,6 +537,10 @@ src/
     pipeline.ts          ingest → detect → analyse → ground
     repo/                GitHub + GitLab clients, URL parsing
     detect/              deterministic candidate extraction
+    detect/mask.ts          comment/string masking, offset-preserving
+    detect/scope.ts         loop depth, enclosing symbol, what triggers it
+    detect/priority.ts      the ranking signal, distinct from confidence
+    detect/engine-profile.ts what the repository declares it connects to
     analyze/             prompt, response parsing, grounding validator
     providers/           one adapter per AI backend
     report/export.ts     Markdown / HTML / JSON / patch
@@ -339,9 +552,12 @@ src/
     analyze/schema-facts.ts declared tables/indexes + index checks
     analyze/sql-shape.ts    structural SQL reader
     detect/relevance.ts     tier two: data-access files with no visible query
+    analyze/orm-shape.ts    round trips and projections, for non-SQL data access
+    analyze/gate.ts         the value gate: what does not get published, and why
   components/            screens and primitives
   store/app-store.ts     zustand state
   pages/                 help.html, privacy.html
   background/            MV3 service worker
 scripts/package.mjs      Web Store zip
+bench/                   the five-repo benchmark, its gates and its baseline
 ```

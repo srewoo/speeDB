@@ -1,3 +1,4 @@
+import { ArchiveUnavailable } from './client'
 import type { RepoFile, RepoRef } from '@/core/types'
 import type { ParsedRepoUrl } from './parse-url'
 import { readTarGz } from './tar'
@@ -90,15 +91,28 @@ export class GitLabClient implements RepoClient {
 
     // Not fetchWithRetry: a partially consumed stream cannot be retried, and
     // the archive has its own much longer deadline.
+    // The reason is preserved rather than collapsed to `null`. A CORS block on
+    // the codeload redirect, a 403 from an exhausted rate limit and a genuine
+    // "this endpoint cannot serve an archive" all used to look identical to the
+    // caller, so the fallback to one-request-per-file was silent — and on GitHub
+    // it was happening every single time.
     const res = await fetch(url, {
       headers: this.headers(),
       signal: ctx?.signal
         ? AbortSignal.any([ctx.signal, AbortSignal.timeout(ARCHIVE_TIMEOUT_MS)])
         : AbortSignal.timeout(ARCHIVE_TIMEOUT_MS),
       redirect: 'follow',
-    }).catch(() => null)
+    }).catch((e: unknown) => {
+      // A CORS block surfaces here as an opaque TypeError, so the message is
+      // annotated with the one cause the user can act on.
+      const detail = e instanceof Error ? e.message : String(e)
+      throw new ArchiveUnavailable(
+        `${detail} — if this is a CORS error, the archive redirect host may not be granted in host_permissions.`,
+      )
+    })
 
-    if (!res?.ok || !res.body) return null
+    if (!res.ok) throw new ArchiveUnavailable(`the forge answered ${res.status} ${res.statusText}`)
+    if (!res.body) throw new ArchiveUnavailable('the response had no body to stream')
 
     let bytes = 0
     const files = await readTarGz(res.body, {

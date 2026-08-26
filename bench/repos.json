@@ -1,0 +1,117 @@
+{
+  "_comment": [
+    "The benchmark corpus. Each entry must be PINNED to a commit SHA before it can be scored:",
+    "an unpinned run is not reproducible, and a benchmark you cannot reproduce cannot show a",
+    "regression. `npm run bench` refuses to score any repo whose `sha` is null.",
+    "",
+    "Pin with:  node bench/pin.mjs            (resolves every null sha via the forge API)",
+    "and commit the result. Never move a pinned SHA without re-auditing that repo — the truth",
+    "file is keyed by SHA precisely so a moved pin cannot silently invalidate it."
+  ],
+  "repos": [
+    {
+      "id": "mt-test-studio",
+      "repo": "mindtickle/qa-automation/mt-test-studio",
+      "forge": "gitlab",
+      "sha": "36972b38162bab88580f1b2df837b732f8c00989",
+      "stack": "Django 4 · MySQL/MariaDB · Django ORM",
+      "scored": true,
+      "notes": [
+        "The regression case, and the reason this document exists.",
+        "Known ground truth: 3 real loop N+1s (core/views.py:878/880, core/views.py:156,",
+        "admin_views.py:1030/1048/1081), 1 real batch opportunity (testcases/views.py:285/422/426),",
+        "5 cold-path migrations that must NOT be reported as performance findings, and 2 JavaScript",
+        "files that must NOT be reported at all. Also the engine-inference case: MySQL only, no",
+        "Mongo, Redis, Hive, BigQuery, Redshift or OpenSearch."
+      ]
+    },
+    {
+      "id": "discourse",
+      "repo": "discourse/discourse",
+      "forge": "github",
+      "sha": "7766dc04d0f74088d3f3bf0689b688fd017f9d03",
+      "stack": "Rails 7 · PostgreSQL · ActiveRecord",
+      "scored": true,
+      "notes": [
+        "Scale (~10k files), scope composition across files, and includes/preload already present",
+        "in places — so it tests that the tool does not 'fix' what is already batched. Exercises",
+        "the indentation-based scope reader on Ruby `.each do`."
+      ]
+    },
+    {
+      "id": "cal.com",
+      "repo": "calcom/cal.com",
+      "forge": "github",
+      "sha": "176037d0afbe572f870a3c702985e7cd83fe6c0c",
+      "stack": "Next.js · TypeScript · Prisma · PostgreSQL",
+      "scored": true,
+      "notes": [
+        "Prisma fragments passed between modules — the case relevance.ts was written for. Tests",
+        "brace-based scope analysis, and tests that Array.prototype.find and Object.keys produce",
+        "zero candidates."
+      ]
+    },
+    {
+      "id": "spring-petclinic",
+      "repo": "spring-projects/spring-petclinic",
+      "forge": "github",
+      "sha": "88e37c15cf6fc8490b01bc3e8e2c800cec1ac272",
+      "stack": "Java · Spring Data JPA · Hibernate · MySQL/H2",
+      "scored": true,
+      "notes": [
+        "Small enough (~50 source files) to hand-audit exhaustively, which makes it the only repo",
+        "where recall is measured against a complete truth set rather than a sampled one. Tests",
+        "@Query, derived query methods, and FetchType.LAZY N+1."
+      ]
+    },
+    {
+      "id": "gitea",
+      "repo": "go-gitea/gitea",
+      "forge": "github",
+      "sha": "90c43e8e782e303aff163d35b3f54522292b8258",
+      "stack": "Go · XORM + raw SQL · MySQL/Postgres/SQLite",
+      "scored": true,
+      "notes": [
+        "Multi-engine by design — the hardest case for Fix 3. EngineProfile.declared should return",
+        "all three and `primary` should be honest about the ambiguity rather than picking one. Also",
+        "the largest share of genuine raw SQL, so it is the control that proves Fix 4 did not break",
+        "the SQL path."
+      ]
+    },
+    {
+      "id": "negative-control",
+      "repo": "chalk/chalk",
+      "forge": "github",
+      "sha": "661317e6f91fe7c90306c2c48ea9354562ee9146",
+      "stack": "TypeScript · no data layer at all",
+      "scored": false,
+      "control": true,
+      "notes": [
+        "Not scored for recall. speeDB must report ZERO findings here, in words, and say so.",
+        "Before Fix 3 it would have found Object.keys()."
+      ]
+    }
+  ],
+  "gates": {
+    "precision": 0.7,
+    "recallAtHigh": 0.6,
+    "noOpRate": 0,
+    "wrongDirectionRate": 0,
+    "nonDataAccessRate": 0,
+    "engineAccuracy": 0.95,
+    "countedFactCoverage": 0.8,
+    "candidateCoverage": 0.9
+  },
+  "baseline": {
+    "_comment": "mt-test-studio, 2026-08-26, before any fix. What the gates are measured against.",
+    "precision": 0.15,
+    "recallAtHigh": 0,
+    "noOpRate": 0.23,
+    "wrongDirectionRate": 0.08,
+    "nonDataAccessRate": 0.15,
+    "coldPathShare": 0.38,
+    "engineAccuracy": 0.6,
+    "countedFactCoverage": 0,
+    "candidateCoverage": 0
+  }
+}

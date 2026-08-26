@@ -109,6 +109,23 @@ export const DEFAULTS = {
   maxOutputTokens: 8_192,
   /** Hard ceiling per scan so a big repo can't silently cost a fortune. */
   scanTokenBudget: 400_000,
+  /**
+   * Query sites per analysis pass.
+   *
+   * Set small on the reasoning that a model asked to review 290 code excerpts in
+   * one response will skim where one asked to review 25 will read. That
+   * reasoning is plausible and it is NOT established: five runs on the same
+   * repository with the same model at temperature 0 found the two known
+   * high-severity defects 0, 0, 2, 2 and 0 times, and the runs that succeeded
+   * and failed span both large and small pass sizes. Run-to-run variance
+   * swamped any configuration effect, so nothing here should be read as a
+   * measured improvement.
+   *
+   * 25 is kept because it is the cheaper mistake: a small pass costs extra
+   * tokens on repeated prompt overhead, a large one risks a skim, and the token
+   * cost is the one of the two that is bounded and visible at the cost gate.
+   */
+  sitesPerPass: 25,
 }
 
 export function findProvider(id: ProviderId): ProviderSpec {

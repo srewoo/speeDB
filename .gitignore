@@ -7,3 +7,16 @@ docs/
 .DS_Store
 release/
 store/
+
+# Bench run outputs: reproducible from a checkout with `npm run bench:detect`,
+# large, and they embed the full file layout of whatever repository was scanned.
+# The scorecards in bench/results/ are the committed artefact — they are what
+# makes a regression visible in a diff.
+bench/runs/
+
+# API keys for the benchmark. `bench/scan.mjs` reads this; it must never be
+# committed, and the extension itself never reads it — the extension keeps keys
+# in chrome.storage.session, memory-backed and cleared when the browser closes.
+.env
+.env.*
+!.env.example

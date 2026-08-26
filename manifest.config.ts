@@ -26,7 +26,17 @@ export default defineManifest({
   // `tabs`     — open the full-screen view and read the active tab URL to prefill the repo field.
   permissions: ['storage', 'sidePanel', 'tabs'],
   // Forge APIs are required — the product does nothing without them.
-  host_permissions: ['https://api.github.com/*', 'https://gitlab.com/api/*'],
+  // `codeload.github.com` is not optional and not cosmetic: the tarball endpoint
+  // on `api.github.com` answers with a 302 to codeload, and a redirect to an
+  // ungranted host is a CORS failure. Without it every GitHub scan fell back to
+  // one request per file — the 2,000-call path the single-archive design exists
+  // to avoid — and the fallback was silent, so the fast path had never actually
+  // run in the extension.
+  host_permissions: [
+    'https://api.github.com/*',
+    'https://codeload.github.com/*',
+    'https://gitlab.com/api/*',
+  ],
   // Cloud LLM hosts are OPTIONAL and requested only when the user selects that
   // provider. Sending source code off-device is therefore an explicit, revocable
   // grant rather than something the install silently authorises — and the

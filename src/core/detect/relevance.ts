@@ -223,5 +223,19 @@ export function sampleRelevantFile(file: RelevantFile, content: string): Candida
     detector: `relevance(${file.reasons.length})`,
     // Below the span-level rules: analysed only when budget allows.
     confidence: 0.7,
+    // Tier two samples a whole file, so there is no single query site to score
+    // and no enclosing scope to read. It sits just under the neutral 0.4 so a
+    // ranked cut-off prefers a real span-level candidate, and is pushed further
+    // down when the path says the file cannot matter in production.
+    priority: coldPath(file.path) ? 0.1 : 0.38,
+    priorityReasons: coldPath(file.path)
+      ? ['0.10 whole-file sample in migration/test code']
+      : ['0.38 whole-file sample: no single query site to score'],
   }
+}
+
+const COLD_PATH = /(^|\/)migrations?\/|(^|\/)seeds?\/|(^|\/)fixtures?\/|(^|\/)tests?\/|(^|\/)spec\/|[._-]test\.|[._-]spec\./i
+
+function coldPath(path: string): boolean {
+  return COLD_PATH.test(path)
 }

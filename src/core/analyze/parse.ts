@@ -148,13 +148,38 @@ function normalise(raw: Record<string, unknown>): Finding {
       equivalenceArgument: String(sug.equivalenceArgument ?? ''),
       assumptions: Array.isArray(sug.assumptions) ? sug.assumptions.map(String) : [],
       expectedImpact: String(sug.expectedImpact ?? ''),
-      requiredMigration: sug.requiredMigration ? String(sug.requiredMigration) : undefined,
+      requiredMigration: cleanMigration(sug.requiredMigration),
     },
     evidence: Array.isArray(raw.evidence) ? (raw.evidence as Finding['evidence']) : [],
     grounding: 'needs-verification',
     groundingNotes: [],
     modelConfidence: num(raw.modelConfidence, 0.5),
   }
+}
+
+/**
+ * A `requiredMigration` that is really the prompt talking back.
+ *
+ * The schema says `"requiredMigration": "DDL that must run first, or omit"`, and
+ * on a real scan **18 of 27 findings** came back with the literal string
+ * `"omit"`. Every one of them then displayed "DDL that must run first: omit" to
+ * the user, added the "whether this index already exists in production" caveat
+ * that only applies to an actual index, and — where the category was
+ * `missing-index` — was treated by the value gate as concerning a schema object,
+ * which exempted it from cold-path suppression.
+ *
+ * A non-empty string is not DDL. DDL contains a DDL verb.
+ */
+const DDL_VERB = /\b(?:CREATE|ALTER|DROP|ADD\s+(?:INDEX|COLUMN|CONSTRAINT)|add_index|create_index|createIndex|addColumn)\b/i
+const PLACEHOLDER = /^\s*(?:omit|none|n\/?a|null|nil|-+|\.{2,}|no(?:ne)? needed|not applicable)\s*\.?\s*$/i
+
+function cleanMigration(v: unknown): string | undefined {
+  if (!v) return undefined
+  const text = String(v).trim()
+  if (!text || PLACEHOLDER.test(text)) return undefined
+  // Prose about a migration is not a migration.
+  if (!DDL_VERB.test(text)) return undefined
+  return text
 }
 
 function pick<T extends string>(v: unknown, allowed: T[], fallback: T): T {

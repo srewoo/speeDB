@@ -18,7 +18,11 @@
     "store:html": "node store/build-html.mjs",
     "store:verify": "node store/verify.mjs",
     "store:assets": "npm run store:icons && npm run store:html && npm run store:verify",
-    "check:cycles": "node scripts/check-cycles.mjs"
+    "check:cycles": "node scripts/check-cycles.mjs",
+    "bench": "node bench/score.mjs",
+    "bench:detect": "node bench/detect.mjs",
+    "bench:scan": "node bench/scan.mjs",
+    "bench:pin": "node bench/pin.mjs"
   },
   "dependencies": {
     "react": "^19.0.0",
@@ -28,11 +32,14 @@
   "devDependencies": {
     "@crxjs/vite-plugin": "^2.0.0-beta.28",
     "@tailwindcss/vite": "^4.0.0",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.2",
     "@types/chrome": "^0.0.287",
     "@types/node": "^26.2.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
+    "jsdom": "^26.1.0",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.2",
     "vite": "^6.0.5",

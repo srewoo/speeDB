@@ -120,8 +120,12 @@ describe('groundFindings', () => {
       suggestion: { ...baseFinding().suggestion, equivalenceArgument: 'Same.' },
     })
     const { kept } = groundFindings([f], { files: files() })
-    expect(kept[0]!.grounding).toBe('needs-verification')
+    // The note is raised, and `grounding` stays `verified`: the citations were
+    // fine, and a thin prose argument is not a citation failure. Conflating the
+    // two capped every ORM finding at `low` severity and told the user its
+    // citations could not be confirmed, which was untrue.
     expect(kept[0]!.groundingNotes.join(' ')).toMatch(/does not address/i)
+    expect(kept[0]!.grounding).toBe('verified')
   })
 
   it('machine-verifies the equivalence of a reformat, not just the citations', () => {
@@ -157,8 +161,12 @@ describe('groundFindings', () => {
     })
     const { kept } = groundFindings([f], { files: files() })
     expect(kept[0]!.kind).toBe('equivalent')
+    // The concern lives in `equivalence.status`, which is the field that means
+    // it. `grounding` answers a different question — were the citations real —
+    // and here they were.
     expect(kept[0]!.equivalence?.status).toBe('partially-verified')
-    expect(kept[0]!.grounding).toBe('needs-verification')
+    expect(kept[0]!.grounding).toBe('verified')
+    expect(kept[0]!.groundingNotes.join(' ')).toMatch(/row limit|LIMIT/i)
     expect(kept[0]!.groundingNotes.join(' ')).toMatch(/only safe if the caller/)
   })
 
@@ -193,5 +201,68 @@ describe('groundFindings', () => {
     })
     const { kept } = groundFindings([f], { files: files() })
     expect(kept[0]!.grounding).toBe('verified')
+  })
+})
+
+describe('grounding means citations, and nothing else', () => {
+  /*
+   * Measured cause of a real failure: across 27 findings in three runs on
+   * mt-test-studio, not one came out above `low`. Predicate equivalence is
+   * undecidable on every ORM rewrite, so every ORM finding picked up an
+   * "undecidable" note; the note landed in the same array as the citation
+   * checks; `grounding` became `needs-verification`; the gate capped severity at
+   * `low`; and the report said "one or more citations could not be confirmed".
+   * Only the last step was visible to the user, and it was false.
+   */
+  it('an undecidable equivalence does not make the citations unconfirmed', () => {
+    const f = baseFinding({
+      original: 'TestCase.objects.filter(section=sec).count()',
+      suggestion: {
+        ...baseFinding().suggestion,
+        proposed: 'TestCase.objects.filter(section__in=secs).values("section").annotate(n=Count("id"))',
+        equivalenceArgument: 'Same rows, same columns, same ordering, same NULL and duplicate handling.',
+      },
+    })
+    // Evidence cleared so the only thing under test is the equivalence note —
+    // a cited file missing from this one-file map would reject on its own.
+    f.evidence = []
+    f.primaryOccurrence = { ...f.primaryOccurrence, excerpt: 'TestCase.objects.filter(section=sec).count()' }
+    // Padded so the cited line is inside the file — an out-of-range line is a
+    // real citation failure and would mask what this test is about.
+    const source = [
+      'def get(self, request, stream):',
+      '    for sec in sections:',
+      '        sc_total = TestCase.objects.filter(section=sec).count()',
+      '        continue',
+    ].join('\n')
+    f.primaryOccurrence = { ...f.primaryOccurrence, startLine: 3, endLine: 3 }
+    const { kept } = groundFindings([f], { files: new Map([[f.primaryOccurrence.file, source]]) })
+
+    expect(kept).toHaveLength(1)
+
+    expect(kept[0]!.equivalence?.status).not.toBe('machine-verified')
+    expect(kept[0]!.grounding).toBe('verified')
+    expect(kept[0]!.groundingNotes.join(' ')).not.toMatch(/citation/i)
+  })
+
+  it('a fabricated evidence path still rejects the finding', () => {
+    const f = baseFinding({
+      evidence: [{
+        kind: 'schema', file: 'db/invented.sql', startLine: 1, endLine: 1,
+        quote: 'CREATE INDEX nope ON policy (x)', relevance: 'made up',
+      }],
+    })
+    const { kept, rejected } = groundFindings([f], { files: files() })
+    expect(kept).toHaveLength(0)
+    expect(rejected).toHaveLength(1)
+  })
+
+  it('a genuine citation failure still degrades grounding', () => {
+    const f = baseFinding({
+      primaryOccurrence: { ...baseFinding().primaryOccurrence, excerpt: 'this text is nowhere in the file at all' },
+    })
+    const { kept } = groundFindings([f], { files: files() })
+    expect(kept[0]!.grounding).toBe('needs-verification')
+    expect(kept[0]!.groundingNotes.join(' ')).toMatch(/Excerpt does not match|not found verbatim/i)
   })
 })

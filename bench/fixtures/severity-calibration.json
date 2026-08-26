@@ -1,0 +1,579 @@
+{
+  "_comment": [
+    "Every finding gpt-5.4-mini published across three real scans of",
+    "mindtickle/qa-automation/mt-test-studio @ 36972b38, reduced to the fields the",
+    "severity derivation reads. Frozen here because bench/runs/ is gitignored.",
+    "",
+    "As published, all 27 were `low` or `info` — the model rated almost everything",
+    "`low` and severity was a ceiling, so evidence could only agree. `matchesRealDefect`",
+    "is set from the human-verified truth file, not from the tool.",
+    "`requiredMigration` values of \"omit\" — the prompt placeholder echoed back — are recorded as null, which is what the parser now produces."
+  ],
+  "findings": [
+    {
+      "title": "Materialize the tag names before counting facets",
+      "file": "tcms/rpc/api/testcase.py",
+      "startLine": 500,
+      "category": "other",
+      "kind": "equivalent",
+      "publishedSeverity": "info",
+      "matchesRealDefect": false,
+      "scope": {
+        "loopDepth": 1,
+        "loopHeaders": [
+          "for name, count in ("
+        ],
+        "symbol": "search_page",
+        "symbolLine": 375,
+        "opensLoop": false,
+        "trigger": "request-handler"
+      },
+      "countedFacts": 0,
+      "original": "Tag.objects.filter(case__id__in=capped_ids)\n            .annotate(cnt=Count(\"case\", distinct=True))\n            .values_list(\"name\", \"cnt\")",
+      "proposed": "Tag.objects.filter(case__id__in=capped_ids).annotate(cnt=Count(\"case\", distinct=True)).values_list(\"name\", \"cnt\")",
+      "requiredMigration": null
+    },
+    {
+      "title": "Keep the ordered execution trend scan as-is",
+      "file": "tcms/telemetry/api.py",
+      "startLine": 135,
+      "category": "other",
+      "kind": "equivalent",
+      "publishedSeverity": "info",
+      "matchesRealDefect": false,
+      "scope": {
+        "loopDepth": 1,
+        "loopHeaders": [
+          "for test_execution in ("
+        ],
+        "symbol": "execution_trends",
+        "symbolLine": 113,
+        "opensLoop": false,
+        "trigger": "request-handler"
+      },
+      "countedFacts": 0,
+      "original": "TestExecution.objects.filter(**query)\n        .select_related(\"status\")\n        .order_by(\"run_id\")",
+      "proposed": "TestExecution.objects.filter(**query).select_related(\"status\").order_by(\"run_id\")",
+      "requiredMigration": null
+    },
+    {
+      "title": "Avoid the extra product lookup when filtering by section",
+      "file": "tcms/testcases/views.py",
+      "startLine": 243,
+      "category": "over-fetch",
+      "kind": "equivalent",
+      "publishedSeverity": "low",
+      "matchesRealDefect": false,
+      "scope": {
+        "loopDepth": 0,
+        "loopHeaders": [],
+        "symbol": "NewCaseView.get_form_kwargs",
+        "symbolLine": 230,
+        "trigger": "request-handler"
+      },
+      "countedFacts": 0,
+      "original": "Section.objects.filter(pk=section_id).select_related(\"product\").first()",
+      "proposed": "Section.objects.filter(pk=section_id).first()",
+      "requiredMigration": null
+    },
+    {
+      "title": "Prefetch plan-case sortkeys before looping",
+      "file": "tcms/testruns/views.py",
+      "startLine": 318,
+      "category": "n-plus-one",
+      "kind": "equivalent",
+      "publishedSeverity": "low",
+      "matchesRealDefect": false,
+      "scope": {
+        "loopDepth": 1,
+        "loopHeaders": [
+          "for case in cases_to_add:"
+        ],
+        "symbol": "NewTestRunView.post",
+        "symbolLine": 207,
+        "trigger": "request-handler"
+      },
+      "countedFacts": 2,
+      "original": "                        tcp = TestCasePlan.objects.get(plan=plan_obj, case=case)",
+      "proposed": "            plan_obj = form.cleaned_data.get(\"plan\")\n            plan_sortkeys = {}\n            if plan_obj:\n                plan_sortkeys = {\n                    tcp.case_id: tcp.sortkey\n                    for tcp in TestCasePlan.objects.filter(plan=plan_obj, case__in=cases_to_add)\n                }\n            loop = 1\n            for case in cases_to_add:\n                sortkey = loop * 10\n                if plan_obj and case.pk in plan_sortkeys:\n                    sortkey = plan_sortkeys[case.pk]\n\n                test_run.create_execution(\n                    case=case,\n                    assignee=form.cleaned_data[\"default_tester\"],",
+      "requiredMigration": null
+    },
+    {
+      "title": "Avoid loading every bug system when matching a URL",
+      "file": "tcms/rpc/api/utils.py",
+      "startLine": 16,
+      "category": "full-scan",
+      "kind": "equivalent",
+      "publishedSeverity": "low",
+      "matchesRealDefect": false,
+      "scope": {
+        "loopDepth": 1,
+        "loopHeaders": [
+          "for bug_system in BugSystem.objects.all():"
+        ],
+        "symbol": "tracker_from_url",
+        "symbolLine": 10,
+        "trigger": "request-handler"
+      },
+      "countedFacts": 2,
+      "original": "    for bug_system in BugSystem.objects.all():",
+      "proposed": "    for bug_system in BugSystem.objects.only(\"base_url\", \"tracker_type\"):\n        if bug_system.base_url and url.startswith(bug_system.base_url):\n            return import_string(bug_system.tracker_type)(bug_system, request)",
+      "requiredMigration": null
+    },
+    {
+      "title": "Load only status fields for telemetry labels",
+      "file": "tcms/telemetry/api.py",
+      "startLine": 122,
+      "category": "over-fetch",
+      "kind": "equivalent",
+      "publishedSeverity": "low",
+      "matchesRealDefect": false,
+      "scope": {
+        "loopDepth": 1,
+        "loopHeaders": [
+          "for status in TestExecutionStatus.objects.all():"
+        ],
+        "symbol": "execution_trends",
+        "symbolLine": 113,
+        "trigger": "request-handler"
+      },
+      "countedFacts": 2,
+      "original": "    for status in TestExecutionStatus.objects.all():",
+      "proposed": "    for status in TestExecutionStatus.objects.only(\"name\", \"color\"):\n        data_set[status.name] = []\n        colors.append(status.color)",
+      "requiredMigration": null
+    },
+    {
+      "title": "Project active runs into a single execution query",
+      "file": "tcms/core/views.py",
+      "startLine": 566,
+      "category": "round-trip",
+      "kind": "equivalent",
+      "publishedSeverity": "low",
+      "matchesRealDefect": false,
+      "scope": {
+        "loopDepth": 1,
+        "loopHeaders": [
+          "for stream in Product.objects.all().order_by(\"    \"):"
+        ],
+        "symbol": "AllStreamsCsvExportView.get",
+        "symbolLine": 545,
+        "trigger": "request-handler"
+      },
+      "countedFacts": 1,
+      "original": "active_run_ids = list(\n                TestRun.objects.filter(\n                    plan__product=stream, stop_date__isnull=True\n                ).values_list(\"pk\", flat=True)\n            )\n            agg = TestExecution.objects.filter(run__in=active_run_ids).aggregate(\n                total=Count(\"pk\"), **exec_count_annotations()\n            )",
+      "proposed": "agg = (\n                TestExecution.objects.filter(\n                    run__plan__product=stream,\n                    run__stop_date__isnull=True,\n                ).aggregate(total=Count(\"pk\"), **exec_count_annotations())\n            )",
+      "requiredMigration": null
+    },
+    {
+      "title": "Fetch superusers in a single ordered result set",
+      "file": "tcms/kiwi_auth/views.py",
+      "startLine": 194,
+      "category": "over-fetch",
+      "kind": "equivalent",
+      "publishedSeverity": "low",
+      "matchesRealDefect": false,
+      "scope": {
+        "loopDepth": 0,
+        "loopHeaders": [],
+        "symbol": "Register",
+        "symbolLine": 124,
+        "trigger": "request-handler"
+      },
+      "countedFacts": 2,
+      "original": "for user in User.objects.filter(is_superuser=True):",
+      "proposed": "for user in User.objects.filter(is_superuser=True).only(\"username\", \"email\", \"first_name\", \"last_name\"):\n            email_display_name = user.get_full_name() or user.username\n            mailto = f'<a href=\"mailto:{user.email}\">{email_display_name}</a>'\n            messages.add_message(request, messages.INFO, mailto)",
+      "requiredMigration": null
+    },
+    {
+      "title": "Select only the testcase-plan keys you actually use",
+      "file": "tcms/rpc/api/testcase.py",
+      "startLine": 778,
+      "category": "over-fetch",
+      "kind": "equivalent",
+      "publishedSeverity": "low",
+      "matchesRealDefect": false,
+      "scope": {
+        "loopDepth": 0,
+        "loopHeaders": [],
+        "symbol": "sortkeys",
+        "symbolLine": 765,
+        "trigger": "request-handler"
+      },
+      "countedFacts": 2,
+      "original": "for record in TestCasePlan.objects.filter(**query):",
+      "proposed": "for record in TestCasePlan.objects.filter(**query).only(\"case_id\", \"sortkey\"):\n        # NOTE: convert to str() otherwise we get:\n        # Unable to serialize result as valid XML: dictionary key must be string\n        result[str(record.case_id)] = record.sortkey",
+      "requiredMigration": null
+    },
+    {
+      "title": "Update cached status lookup from a projected queryset",
+      "file": "scripts/run_assetshare_cases.py",
+      "startLine": 36,
+      "category": "over-fetch",
+      "kind": "equivalent",
+      "publishedSeverity": "low",
+      "matchesRealDefect": false,
+      "scope": {
+        "loopDepth": 0,
+        "loopHeaders": [],
+        "symbol": null,
+        "symbolLine": null,
+        "trigger": "unknown"
+      },
+      "countedFacts": 2,
+      "original": "status = {s.name: s for s in TestExecutionStatus.objects.all()}",
+      "proposed": "status = {s.name: s for s in TestExecutionStatus.objects.only(\"name\")}\n",
+      "requiredMigration": null
+    },
+    {
+      "title": "Use a single projected query for active field configs",
+      "file": "tcms/testcases/views.py",
+      "startLine": 127,
+      "category": "over-fetch",
+      "kind": "equivalent",
+      "publishedSeverity": "low",
+      "matchesRealDefect": false,
+      "scope": {
+        "loopDepth": 0,
+        "loopHeaders": [],
+        "symbol": "_active_custom_fields",
+        "symbolLine": 119,
+        "trigger": "request-handler"
+      },
+      "countedFacts": 2,
+      "original": "for cfg in TestCaseFieldConfig.objects.filter(is_active=True, is_system=False)",
+      "proposed": "return {\n        f\"{_CUSTOM_PREFIX}{cfg.field_key}\": cfg\n        for cfg in TestCaseFieldConfig.objects.filter(is_active=True, is_system=False).only(\"field_key\")\n    }",
+      "requiredMigration": null
+    },
+    {
+      "title": "Reuse the fetched plan in both clone handlers",
+      "file": "tcms/testplans/views.py",
+      "startLine": 421,
+      "category": "round-trip",
+      "kind": "equivalent",
+      "publishedSeverity": "low",
+      "matchesRealDefect": false,
+      "scope": {
+        "loopDepth": 0,
+        "loopHeaders": [],
+        "symbol": "Clone.get",
+        "symbolLine": 420,
+        "trigger": "request-handler"
+      },
+      "countedFacts": 1,
+      "original": "self.object = TestPlan.objects.get(pk=kwargs[\"pk\"])\n        return super().get(request, *args, **kwargs)",
+      "proposed": "def dispatch(self, request, *args, **kwargs):\n        self.object = TestPlan.objects.get(pk=kwargs[\"pk\"])\n        return super().dispatch(request, *args, **kwargs)",
+      "requiredMigration": null
+    },
+    {
+      "title": "Use primary-key existence check for priority validation",
+      "file": "tcms/core/admin_views.py",
+      "startLine": 400,
+      "category": "other",
+      "kind": "equivalent",
+      "publishedSeverity": "low",
+      "matchesRealDefect": false,
+      "scope": {
+        "loopDepth": 0,
+        "loopHeaders": [],
+        "symbol": "PriorityForm.post",
+        "symbolLine": 391,
+        "trigger": "unknown"
+      },
+      "countedFacts": 0,
+      "original": "elif Priority.objects.filter(value=value).exclude(pk=pk or 0).exists():",
+      "proposed": "elif pk and Priority.objects.filter(value=value).exclude(pk=pk).exists():\n            errors[\"value\"] = _(\"A priority with this name already exists.\")",
+      "requiredMigration": null
+    },
+    {
+      "title": "Filter permissions by exact app label",
+      "file": "tcms/bugs/migrations/0002_add_permissions.py",
+      "startLine": 14,
+      "category": "missing-index",
+      "kind": "equivalent",
+      "publishedSeverity": "low",
+      "matchesRealDefect": false,
+      "scope": {
+        "loopDepth": 0,
+        "loopHeaders": [],
+        "symbol": "forwards_add_perms",
+        "symbolLine": 4,
+        "trigger": "migration"
+      },
+      "countedFacts": 0,
+      "original": "permission_model.objects.filter(\n        content_type__app_label__contains=\"bugs\"\n    )",
+      "proposed": "permission_model.objects.filter(content_type__app_label=\"bugs\")",
+      "requiredMigration": null
+    },
+    {
+      "title": "Filter permissions by exact app label",
+      "file": "tcms/core/migrations/0001_squashed.py",
+      "startLine": 46,
+      "category": "missing-index",
+      "kind": "equivalent",
+      "publishedSeverity": "low",
+      "matchesRealDefect": false,
+      "scope": {
+        "loopDepth": 0,
+        "loopHeaders": [],
+        "symbol": "forwards_add_default_perms",
+        "symbolLine": 27,
+        "trigger": "migration"
+      },
+      "countedFacts": 0,
+      "original": "permission_model.objects.filter(\n            content_type__app_label__contains=app_name\n        )",
+      "proposed": "permission_model.objects.filter(content_type__app_label=app_name)",
+      "requiredMigration": null
+    },
+    {
+      "title": "Use the relation for linked records",
+      "file": "tcms/testruns/models.py",
+      "startLine": 341,
+      "category": "other",
+      "kind": "equivalent",
+      "publishedSeverity": "low",
+      "matchesRealDefect": false,
+      "scope": {
+        "loopDepth": 0,
+        "loopHeaders": [],
+        "symbol": "TestExecution",
+        "symbolLine": 291,
+        "trigger": "unknown"
+      },
+      "countedFacts": 0,
+      "original": "LinkReference.objects.filter(execution=self.pk)",
+      "proposed": "LinkReference.objects.filter(execution=self)",
+      "requiredMigration": null
+    },
+    {
+      "title": "Use the relation for property lookups",
+      "file": "tcms/testruns/models.py",
+      "startLine": 357,
+      "category": "other",
+      "kind": "equivalent",
+      "publishedSeverity": "low",
+      "matchesRealDefect": false,
+      "scope": {
+        "loopDepth": 0,
+        "loopHeaders": [],
+        "symbol": "TestExecution",
+        "symbolLine": 291,
+        "trigger": "unknown"
+      },
+      "countedFacts": 0,
+      "original": "TestExecutionProperty.objects.filter(execution=self.pk)",
+      "proposed": "TestExecutionProperty.objects.filter(execution=self)",
+      "requiredMigration": null
+    },
+    {
+      "title": "Keep the status and priority lookups as first-row queries",
+      "file": "tcms/testcases/views.py",
+      "startLine": 681,
+      "category": "other",
+      "kind": "equivalent",
+      "publishedSeverity": "info",
+      "matchesRealDefect": false,
+      "scope": {
+        "loopDepth": 0,
+        "loopHeaders": [],
+        "symbol": "ImportCasesView._do_import",
+        "symbolLine": 625,
+        "trigger": "request-handler"
+      },
+      "countedFacts": 0,
+      "original": "TestCaseStatus.objects.filter(is_confirmed=True).order_by(\"pk\").first()\n[...]\nPriority.objects.filter(is_active=True).order_by(\"pk\").first()",
+      "proposed": "TestCaseStatus.objects.filter(is_confirmed=True).order_by(\"pk\").first()\n        )\n        default_priority = (\n            Priority.objects.filter(is_active=True).order_by(\"pk\").first()",
+      "requiredMigration": null
+    },
+    {
+      "title": "Use the existing sibling-name set more directly",
+      "file": "tcms/testcases/models.py",
+      "startLine": 358,
+      "category": "over-fetch",
+      "kind": "equivalent",
+      "publishedSeverity": "info",
+      "matchesRealDefect": false,
+      "scope": {
+        "loopDepth": 0,
+        "loopHeaders": [],
+        "symbol": "Section.unique_sibling_name",
+        "symbolLine": 341,
+        "trigger": "unknown"
+      },
+      "countedFacts": 0,
+      "original": "Section.objects.filter(\n                product_id=product_id, parent_id=parent_id\n            ).values_list(\"name\", flat=True)",
+      "proposed": "Section.objects.filter(product_id=product_id, parent_id=parent_id).values_list(\"name\", flat=True)",
+      "requiredMigration": null
+    },
+    {
+      "title": "Batch imported run existence checks",
+      "file": "tcms/core/admin_views.py",
+      "startLine": 1048,
+      "category": "n-plus-one",
+      "kind": "behavioural",
+      "publishedSeverity": "low",
+      "matchesRealDefect": true,
+      "scope": {
+        "loopDepth": 2,
+        "loopHeaders": [
+          "for run_data in plan_data.get(\"    \", []):",
+          "for plan_data in plans_data:"
+        ],
+        "symbol": "StreamImportView.post",
+        "symbolLine": 763,
+        "trigger": "request-handler"
+      },
+      "countedFacts": 3,
+      "original": "                    and TestRun.objects.filter(global_id=old_run_gid).exists()",
+      "proposed": "        existing_run_gids = set(\n            TestRun.objects.filter(global_id__in={\n                run_data.get(\"global_id\", \"\")\n                for plan_data in plans_data\n                for run_data in plan_data.get(\"runs\", [])\n                if run_data.get(\"global_id\", \"\")\n            }).values_list(\"global_id\", flat=True)\n        )\n\n        for plan_data in plans_data:\n            for run_data in plan_data.get(\"runs\", []):\n                old_run_gid = run_data.get(\"global_id\", \"\")\n                if old_run_gid and old_run_gid in existing_run_gids:\n                    skipped.append(f\"Run {old_run_gid} (already exists)\")\n                    continue",
+      "requiredMigration": null
+    },
+    {
+      "title": "Push the last-activity lookup into a grouped aggregate",
+      "file": "tcms/core/views.py",
+      "startLine": 176,
+      "category": "sort-in-memory",
+      "kind": "behavioural",
+      "publishedSeverity": "low",
+      "matchesRealDefect": true,
+      "scope": {
+        "loopDepth": 1,
+        "loopHeaders": [
+          "for stream in Product.objects.all().order_by(\"    \"):"
+        ],
+        "symbol": "DashboardView.get_context_data",
+        "symbolLine": 127,
+        "trigger": "request-handler"
+      },
+      "countedFacts": 0,
+      "original": "                TestExecution.objects.filter(\n                    run__plan__product=stream, stop_date__isnull=False\n                )\n                .order_by(\"-stop_date\")\n                .values(\"stop_date\")\n                .first()",
+      "proposed": "                TestExecution.objects.filter(\n                    run__plan__product=stream, stop_date__isnull=False\n                ).aggregate(stop_date=models.Max(\"stop_date\"))",
+      "requiredMigration": null
+    },
+    {
+      "title": "Count cases through the relation instead of per-stream counting",
+      "file": "tcms/core/views.py",
+      "startLine": 186,
+      "category": "n-plus-one",
+      "kind": "behavioural",
+      "publishedSeverity": "low",
+      "matchesRealDefect": true,
+      "scope": {
+        "loopDepth": 1,
+        "loopHeaders": [
+          "for stream in Product.objects.all().order_by(\"    \"):"
+        ],
+        "symbol": "DashboardView.get_context_data",
+        "symbolLine": 127,
+        "trigger": "request-handler"
+      },
+      "countedFacts": 3,
+      "original": "TestCase.objects.filter(section__product=stream).count()",
+      "proposed": "            case_counts = {\n                row[\"section__product\"]: row[\"count\"]\n                for row in TestCase.objects.values(\"section__product\").annotate(count=Count(\"pk\"))\n            }\n            ...\n                    case_counts.get(stream.pk, 0),",
+      "requiredMigration": null
+    },
+    {
+      "title": "Resolve tags in batch before syncing test case tags",
+      "file": "tcms/testcases/views.py",
+      "startLine": 422,
+      "category": "n-plus-one",
+      "kind": "behavioural",
+      "publishedSeverity": "low",
+      "matchesRealDefect": true,
+      "scope": {
+        "loopDepth": 1,
+        "loopHeaders": [
+          "for name in existing - submitted:"
+        ],
+        "symbol": "EditTestCaseView.form_valid",
+        "symbolLine": 410,
+        "trigger": "request-handler"
+      },
+      "countedFacts": 2,
+      "original": "                    tag_obj = Tag.objects.filter(name=name).first()",
+      "proposed": "            needed = existing ^ submitted\n            tag_map = {t.name: t for t in Tag.objects.filter(name__in=needed)}\n            for name in existing - submitted:\n                tag_obj = tag_map.get(name)\n                if tag_obj:\n                    self.object.remove_tag(tag_obj)\n            for name in submitted - existing:\n                tag_obj = tag_map.get(name)\n                if tag_obj:\n                    self.object.add_tag(tag_obj)",
+      "requiredMigration": null
+    },
+    {
+      "title": "Drop the redundant distinct from the ordered tag lookup",
+      "file": "tcms/rpc/api/tag.py",
+      "startLine": 23,
+      "category": "sort-in-memory",
+      "kind": "behavioural",
+      "publishedSeverity": "low",
+      "matchesRealDefect": false,
+      "scope": {
+        "loopDepth": 0,
+        "loopHeaders": [],
+        "symbol": "filter",
+        "symbolLine": 12,
+        "trigger": "request-handler"
+      },
+      "countedFacts": 0,
+      "original": "Tag.objects.filter(**query).values(\"id\", \"name\").order_by(\"id\").distinct()",
+      "proposed": "Tag.objects.filter(**query).values(\"id\", \"name\").order_by(\"id\")",
+      "requiredMigration": null
+    },
+    {
+      "title": "Replace per-row fetch with direct existence check",
+      "file": "tcms/bugs/tests/test_permissions.py",
+      "startLine": 157,
+      "category": "over-fetch",
+      "kind": "behavioural",
+      "publishedSeverity": "info",
+      "matchesRealDefect": false,
+      "scope": {
+        "loopDepth": 0,
+        "loopHeaders": [],
+        "symbol": "TestM2MPermissionsExist.test_permissions_exist",
+        "symbolLine": 155,
+        "trigger": "test"
+      },
+      "countedFacts": 0,
+      "original": "Permission.objects.filter(content_type=ctype).count()",
+      "proposed": "Permission.objects.filter(content_type=ctype).exists()",
+      "requiredMigration": null
+    },
+    {
+      "title": "Deduplicate the active run IDs before filtering executions",
+      "file": "tcms/core/views.py",
+      "startLine": 160,
+      "category": "other",
+      "kind": "equivalent",
+      "publishedSeverity": "low",
+      "matchesRealDefect": true,
+      "scope": {
+        "loopDepth": 1,
+        "loopHeaders": [
+          "for stream in Product.objects.all().order_by(\"    \"):"
+        ],
+        "symbol": "DashboardView.get_context_data",
+        "symbolLine": 127,
+        "trigger": "request-handler"
+      },
+      "countedFacts": 0,
+      "original": "TestExecution.objects.filter(run__in=active_run_ids).aggregate(",
+      "proposed": "active_run_ids = list(dict.fromkeys(active_run_ids))\nagg = TestExecution.objects.filter(run__in=active_run_ids).aggregate(",
+      "requiredMigration": null
+    },
+    {
+      "title": "Prefer a single filter for matching cases",
+      "file": "tcms/testruns/views.py",
+      "startLine": 301,
+      "category": "other",
+      "kind": "equivalent",
+      "publishedSeverity": "low",
+      "matchesRealDefect": false,
+      "scope": {
+        "loopDepth": 0,
+        "loopHeaders": [],
+        "symbol": "NewTestRunView.post",
+        "symbolLine": 207,
+        "trigger": "request-handler"
+      },
+      "countedFacts": 0,
+      "original": "TestCase.objects.filter(pk__in=case_ids, case_status__is_confirmed=True).order_by(\"pk\")",
+      "proposed": "TestCase.objects.filter(case_status__is_confirmed=True, pk__in=case_ids).order_by(\"pk\")",
+      "requiredMigration": null
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+[
+  {
+    "_note": "Exhaustive audit. spring-petclinic has 49 Java files and one data layer, so this truth set is complete rather than sampled — which is why fix.md chose it as the only repo where recall is measured against everything there is to find.",
+    "file": "src/main/java/org/springframework/samples/petclinic/owner/Owner.java",
+    "startLine": 64, "endLine": 64,
+    "enclosingSymbol": "Owner.pets",
+    "trigger": "unknown",
+    "loopDepth": 0,
+    "category": "n-plus-one",
+    "severity": "high",
+    "queriesNow": "1 for the page of owners, then 1 per owner for its pets",
+    "queriesAfter": "1, with a join fetch or an @EntityGraph on the finder",
+    "why": "@OneToMany(fetch = FetchType.EAGER) on Owner.pets, reached through the paginated findByLastNameStartingWith, makes Hibernate issue a select per owner; it also cannot paginate in SQL alongside a collection fetch.",
+    "outputIdentical": true
+  },
+  {
+    "file": "src/main/java/org/springframework/samples/petclinic/owner/Pet.java",
+    "startLine": 56, "endLine": 56,
+    "enclosingSymbol": "Pet.visits",
+    "trigger": "unknown",
+    "loopDepth": 0,
+    "category": "n-plus-one",
+    "severity": "high",
+    "queriesNow": "1 per pet for its visits, nested inside the per-owner pet fetch",
+    "queriesAfter": "1, batched by @BatchSize or a join fetch",
+    "why": "@OneToMany(fetch = FetchType.EAGER) on Pet.visits compounds the Owner.pets N+1: owners page -> pets per owner -> visits per pet.",
+    "outputIdentical": true
+  },
+  {
+    "file": "src/main/java/org/springframework/samples/petclinic/vet/Vet.java",
+    "startLine": 47, "endLine": 47,
+    "enclosingSymbol": "Vet.specialties",
+    "trigger": "unknown",
+    "loopDepth": 0,
+    "category": "n-plus-one",
+    "severity": "medium",
+    "queriesNow": "1 per vet for its specialties, across the paginated vet list",
+    "queriesAfter": "1, with @EntityGraph on findAll(Pageable)",
+    "why": "@ManyToMany(fetch = FetchType.EAGER) on Vet.specialties, read through VetController.findPaginated, issues a select per vet on the page.",
+    "outputIdentical": true
+  }
+]

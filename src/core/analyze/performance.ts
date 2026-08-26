@@ -1,6 +1,8 @@
 import { engineSpec } from '@/config/engines'
 import { explainFor } from '@/config/explain'
 import { readSqlShape } from './sql-shape'
+import { ormVerificationRecipe, readOrmShape, type OrmShape } from './orm-shape'
+import type { EnclosingScope } from '@/core/detect/scope'
 
 /**
  * The speed claim, held to the same standard as the equivalence claim.
@@ -54,6 +56,8 @@ export function checkPerformance(input: {
   original: string
   proposed: string
   requiredMigration?: string
+  /** Loop nesting and trigger, so a per-iteration query can be counted as one. */
+  scope?: EnclosingScope | null
 }): PerformanceCheck {
   const spec = engineSpec(input.engine)
   const recipe = explainFor(spec.id, spec.family)
@@ -81,6 +85,104 @@ export function checkPerformance(input: {
 
   if (a?.kind === 'ddl-index' && b?.kind === 'ddl-index') {
     counted.push('Changes an index definition. Index maintenance cost is paid on every write to the table.')
+  }
+
+  /* ---- the same facts, for code that is not SQL text --------------------- */
+  //
+  // Django, Rails, Hibernate, Prisma, SQLAlchemy, GORM, EF Core, Sequelize and
+  // TypeORM all fail `readSqlShape`, which used to mean this block produced
+  // nothing at all for the majority of real application data access. Round
+  // trips and projections are countable from ORM text too, and counting them is
+  // the difference between "not machine-checkable" and "401 database calls
+  // become 1, counted from the code".
+  const isSqlPair = isStatement(a) && isStatement(b)
+  const oa = isSqlPair ? null : readOrmShape(input.original, input.scope)
+  const ob = isSqlPair ? null : readOrmShape(input.proposed, input.scope)
+
+  if (oa && ob) {
+    // A proposal that counts *zero* evaluating calls has usually had its query
+    // moved outside the snippet rather than eliminated — the reader can only see
+    // what it was given. "Issues 0 database calls where the original issues 1"
+    // reads as a fact and is really a boundary artefact, so it is stated as what
+    // was actually observed.
+    if (ob.queryCount === 0 && oa.queryCount > 0) {
+      counted.push(
+        `Issues no database call within the code shown, where the original issues ${oa.queryCount}. ` +
+        'Whether the work moved or disappeared is not decidable from this excerpt. (Counted, not measured.)',
+      )
+    } else if (ob.queryCount < oa.queryCount) {
+      counted.push(
+        `Issues ${ob.queryCount} database call(s) where the original issues ${oa.queryCount}. ` +
+        '(Counted from the code, not measured.)',
+      )
+    }
+    if (oa.perIteration && !ob.perIteration) {
+      counted.push(
+        'Moves the query out of the loop: one call for the whole set instead of one per iteration. ' +
+        '(Counted from the code, not measured.)',
+      )
+    }
+    if (oa.perIteration && ob.batched && !oa.batched) {
+      counted.push(
+        'Replaces a per-row lookup with a single set-membership predicate. ' +
+        '(Counted from the code, not measured.)',
+      )
+    }
+    if (oa.projection === null && ob.projection && ob.projection.length > 0) {
+      counted.push(
+        `Fetches ${ob.projection.length} named column(s) instead of whole model instances. (Counted, not measured.)`,
+      )
+    } else if (oa.projection && ob.projection && ob.projection.length < oa.projection.length) {
+      counted.push(
+        `Fetches ${oa.projection.length - ob.projection.length} fewer column(s). (Counted, not measured.)`,
+      )
+    }
+    if (!oa.limit && ob.limit) {
+      counted.push(
+        `Caps the result at ${ob.limit} row(s), where the original was unbounded. (Counted, not measured.)`,
+      )
+    }
+    /*
+     * Shapes the round-trip count cannot see.
+     *
+     * On a real scan 10 of 31 findings carried no counted fact at all, and the
+     * same three rewrites accounted for most of them. Each is structural and
+     * decidable from the two versions — which is the standard a counted fact has
+     * to meet — and leaving them uncounted pushed genuine findings down to
+     * `low`, because severity rests on having counted something.
+     */
+    const term = (shape: OrmShape, name: string) => shape.terminals.some((t) => t.startsWith(name))
+
+    if (term(oa, 'count') && (term(ob, 'exists') || term(ob, 'any'))) {
+      counted.push(
+        'Stops at the first matching row instead of counting every one. ' +
+        '(Counted from the code, not measured.)',
+      )
+    }
+    if (oa.orderBy.length > 0 && ob.orderBy.length === 0 && ob.aggregates.length > 0) {
+      counted.push(
+        `Replaces an ordered scan and fetch with a single ${ob.aggregates.join('/')} aggregate, ` +
+        'so the database no longer has to order the rows to return one value. (Counted, not measured.)',
+      )
+    }
+    if (!oa.materialised && ob.materialised && ob.queryCount <= oa.queryCount) {
+      counted.push(
+        'Evaluates the queryset once and reuses the result, where the original re-runs it on each use. ' +
+        '(Counted from the code, not measured.)',
+      )
+    }
+
+    if (oa.eagerLoads.length === 0 && ob.eagerLoads.length > 0) {
+      counted.push(
+        `Adds eager loading (${ob.eagerLoads.join(', ')}), so related rows arrive with the parent query rather than one query each. (Counted, not measured.)`,
+      )
+    }
+  }
+
+  if (oa && ob && oa.perIteration) {
+    unmeasured.push(
+      'How many iterations the enclosing loop actually runs. That is the multiplier on this whole finding, and source code does not contain it.',
+    )
   }
 
   /* ---- what cannot be known from here ----------------------------------- */
@@ -114,7 +216,7 @@ export function checkPerformance(input: {
   /* ---- how to settle it ------------------------------------------------- */
 
   const verification: VerificationStep[] = []
-  const isSql = a?.kind === 'select' || a?.kind === 'update' || a?.kind === 'delete' || a?.kind === 'insert'
+  const isSql = isStatement(a)
 
   if (recipe.measure && isSql) {
     verification.push(
@@ -126,6 +228,16 @@ export function checkPerformance(input: {
       { label: 'Plan for the current query', command: `${recipe.plan}\n${input.original.trim()};` },
       { label: 'Plan for the proposed query', command: `${recipe.plan}\n${input.proposed.trim()};` },
     )
+  } else if (oa || ob) {
+    // ORM code. `EXPLAIN ANALYZE` against a Django queryset is not a
+    // verification step but a category error — the user cannot run it, and
+    // offering it is how this block ended up pointing EXPLAIN ANALYZE at
+    // JavaScript string concatenation. The claim is a query count, so the
+    // instrument is a query counter.
+    verification.push({
+      label: `Count the queries this issues (${(oa ?? ob)!.dialect})`,
+      command: ormVerificationRecipe((oa ?? ob)!.dialect),
+    })
   } else {
     // Non-SQL engines: the recipe itself is the instruction.
     verification.push({
@@ -135,7 +247,7 @@ export function checkPerformance(input: {
     })
   }
 
-  if (recipe.stats?.length) {
+  if (recipe.stats?.length && (isSql || !(oa || ob))) {
     verification.push({
       label: 'The data facts speeDB cannot see',
       command: recipe.stats.join('\n'),
@@ -165,3 +277,14 @@ export function checkPerformance(input: {
 function oneLine(sql: string): string {
   return sql.replace(/\s+/g, ' ').trim().slice(0, 120)
 }
+
+/** True for a statement the SQL reader actually understood. */
+function isStatement(shape: { kind: string } | null): boolean {
+  return (
+    shape?.kind === 'select' || shape?.kind === 'update' ||
+    shape?.kind === 'delete' || shape?.kind === 'insert' || shape?.kind === 'ddl-index'
+  )
+}
+
+/** Re-exported so callers can name the shape they passed through. */
+export type { OrmShape }

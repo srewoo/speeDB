@@ -15,6 +15,12 @@
 import type { EquivalenceCheck } from './analyze/equivalence'
 import type { PerformanceCheck } from './analyze/performance'
 import type { IndexAdvice } from './analyze/schema-facts'
+import type { EnclosingScope } from './detect/scope'
+import type { EngineProfile } from './detect/engine-profile'
+import type { Suppression } from './analyze/gate'
+export type { EnclosingScope, TriggerKind } from './detect/scope'
+export type { EngineProfile, EngineDeclaration } from './detect/engine-profile'
+export type { SuppressionReason, Suppression } from './analyze/gate'
 export type { EquivalenceCheck, EquivalenceStatus, EquivalenceDelta } from './analyze/equivalence'
 export type { PerformanceCheck, PerformanceStatus, VerificationStep } from './analyze/performance'
 export type { IndexAdvice, SchemaFacts, IndexFact } from './analyze/schema-facts'
@@ -70,8 +76,28 @@ export interface Candidate {
   accessStyle: AccessStyle
   /** Which detector rule matched — useful for tuning precision. */
   detector: string
-  /** 0..1. Detector's own confidence; used to order work under a token budget. */
+  /**
+   * 0..1. Detector's own confidence that this IS a query — a precision signal.
+   * Gated on, never ranked on: it says nothing about whether the query matters.
+   */
   confidence: number
+  /**
+   * 0..1. How likely this query is to matter — the ranking signal.
+   *
+   * The per-file cap used to keep the first N spans by line number, which in a
+   * file whose expensive report view sits at the bottom discarded exactly the
+   * half worth analysing. Capping now happens on this.
+   */
+  priority: number
+  /** Why it scored that way. Surfaced in the report's coverage section. */
+  priorityReasons: string[]
+  /**
+   * What encloses the query: loop nesting, the nearest symbol, and what
+   * triggers the path. A query that runs once per request inside a loop and a
+   * query at module scope are not the same finding, and without this the
+   * `n-plus-one` category was unreachable except by luck.
+   */
+  scope?: EnclosingScope
 }
 
 /* -------------------------------------------------------------- findings -- */
@@ -186,6 +212,24 @@ export interface Finding {
   /** Result of checking a proposed index against the declared schema. */
   indexAdvice?: IndexAdvice
 
+  /**
+   * The enclosing scope of the primary occurrence, recomputed from the fetched
+   * file rather than taken from the model. Drives the severity ceiling and the
+   * cold-path suppression rule.
+   */
+  scope?: EnclosingScope
+  /** Set when the value gate held this finding back. Never silently dropped. */
+  suppression?: Suppression
+
+  /**
+   * The severity the model proposed, kept beside the derived one.
+   *
+   * `severity` is computed from checked evidence — loop depth, trigger, counted
+   * facts. This is the model's unverified guess, retained so a disagreement is
+   * visible rather than silently overwritten.
+   */
+  modelSeverity?: Severity
+
   grounding: GroundingStatus
   /** Human-readable reasons the grounding pass flagged this. */
   groundingNotes: string[]
@@ -205,6 +249,45 @@ export interface ScanStats {
   /** Total forge API calls. The archive path makes three; per-file makes N+3. */
   apiCalls: number
   candidatesFound: number
+  /**
+   * Every candidate site either tier produced, before any filtering.
+   *
+   * Tier two is included, and must be: counting only the tier-one merged spans
+   * made `sitesAnalysed` exceed `sitesMatched` on any repository where a
+   * data-access file has no lexically visible query — which is most Java and
+   * Rails repositories, and was 5 of 29 sites on spring-petclinic. Numbers that
+   * do not add up are their own kind of dishonesty.
+   */
+  sitesMatched: number
+  /** Of those, how many came from tier two: whole-file samples. */
+  sitesSampled: number
+  /**
+   * Candidates that survived filtering and were lined up for analysis.
+   *
+   * Distinct from `sitesAnalysed`, which counts only what a completed pass
+   * actually sent. On a large repository the token budget stops the loop with
+   * most of the queue untouched, and conflating the two would claim coverage
+   * the scan never had.
+   */
+  sitesQueued: number
+  /** Spans actually sent to the model. */
+  sitesAnalysed: number
+  /** Dropped before analysis, split by why. `candidatesFound` counts neither. */
+  sitesFiltered: { belowConfidence: number; lowPriority: number }
+  /** Files where the per-file cap bit, and by how much. Never silent. */
+  truncatedFiles: { path: string; found: number; analysed: number }[]
+  /**
+   * Sites the triage stage was asked about and returned no verdict for.
+   *
+   * The accounting contract is that every site gets an answer. When one does not
+   * it is escalated to the authoring stage rather than assumed clean — but the
+   * escalation is a workaround, and a scan where it happened often is a scan
+   * whose triage was not working. Surfacing the count is what makes that
+   * visible instead of merely handled.
+   */
+  sitesUnaccounted: number
+  /** Triage outcome counts. Tiny, so always recorded. */
+  triage?: { flagged: number; clean: number; unsure: number }
   chunksAnalysed: number
   /** Input tokens. Kept separate from output — they are priced differently. */
   promptTokens: number
@@ -223,9 +306,26 @@ export interface ScanReport {
   findings: Finding[]
   /** Findings the grounding pass rejected — kept for transparency/debugging. */
   rejected: Finding[]
+  /**
+   * Findings the value gate held back, each carrying its reason.
+   *
+   * Kept rather than dropped so the gate is auditable: a gate that silently
+   * eats a true positive is worse than the padding it was written to remove.
+   */
+  suppressed: Finding[]
   stats: ScanStats
   /** Populated when the scan stopped early (budget, cancel, rate limit). */
   truncatedReason?: string
+  /**
+   * Set when the single-archive ingest failed and the scan fell back to reading
+   * one file per request.
+   *
+   * The fallback works, so nothing about the findings changes — but it costs
+   * three orders of magnitude more forge API calls, and for a long time it was
+   * happening on every GitHub scan without a word anywhere. A performance
+   * failure that hides itself is indistinguishable from no failure.
+   */
+  ingestNote?: string
   /**
    * What the repository declares about its schema, and — just as importantly —
    * what could not be known from source at all.
@@ -235,6 +335,43 @@ export interface ScanReport {
     indexes: number
     sources: string[]
     unknowable: readonly string[]
+  }
+  /**
+   * What the repository declares it connects to, with the file and line that
+   * declared it. In the header so a wrong inference is visible, not silent.
+   */
+  engineProfile?: EngineProfile
+  /**
+   * Per-site triage outcomes.
+   *
+   * The two-stage analysis built an accounting contract and then threw the
+   * accounting away, which left every miss with three indistinguishable causes:
+   * triage answered `clean`, triage was never asked, or the author declined the
+   * site. A defect at priority 1.0, inside a loop, in a request handler was
+   * missed on a real scan and none of those could be ruled out.
+   *
+   * Flagged and unsure sites carry their reason because that is what you read
+   * when a finding looks wrong. Clean sites carry only their id — the bulk of
+   * the list, and "was it triaged clean" is the whole question for them.
+   */
+  triageLog?: {
+    flagged: { id: string; category: string; why: string }[]
+    unsure: { id: string; category: string; why: string }[]
+    clean: string[]
+    /** Sites triage never answered for, escalated rather than assumed clean. */
+    unaccounted: string[]
+  }
+  /**
+   * What the authoring stage did with each site triage handed it.
+   *
+   * A site that is neither written up nor explicitly declined was dropped in
+   * silence — the same failure the two-stage split was built to remove, one
+   * stage later. On the run that exposed it, authoring covered 42% of flagged
+   * sites and dropped all ten lines of the three known defects.
+   */
+  authorLog?: {
+    declined: { siteId: string; why: string }[]
+    unaccounted: string[]
   }
   /** What was analysed: the whole repository, or one pull/merge request. */
   scope?:

@@ -1,0 +1,64 @@
+[
+  {
+    "_note": "fix.md: 'admin_views.py:1030/1048/1081' \u2014 ONE defect, an import routine issuing an existence check per plan, per run and per execution. A finding at any of these lines is that defect.",
+    "file": "tcms/core/admin_views.py",
+    "startLine": 1030,
+    "endLine": 1081,
+    "lines": [
+      1030,
+      1048,
+      1081
+    ],
+    "enclosingSymbol": "import_data",
+    "trigger": "request-handler",
+    "loopDepth": 3,
+    "category": "n-plus-one",
+    "severity": "high",
+    "queriesNow": "one existence check per plan, per run, per execution",
+    "queriesAfter": "one set-membership query per level",
+    "why": "Three nested loops, one query at each level.",
+    "outputIdentical": true
+  },
+  {
+    "_note": "fix.md: 'testcases/views.py:285/422/426' \u2014 ONE batch opportunity, tag resolution per submitted name.",
+    "file": "tcms/testcases/views.py",
+    "startLine": 285,
+    "endLine": 426,
+    "lines": [
+      285,
+      422,
+      426
+    ],
+    "enclosingSymbol": "TestCaseTagView.post",
+    "trigger": "request-handler",
+    "loopDepth": 1,
+    "category": "batching",
+    "severity": "medium",
+    "queriesNow": "1 get_or_create per submitted tag name",
+    "queriesAfter": "1 set-membership query plus one bulk_create",
+    "why": "Tag resolution runs once per submitted name inside the loop.",
+    "outputIdentical": true
+  },
+  {
+    "_note": "fix.md names 'core/views.py:156'. Verified independently by reading the source at this commit, NOT taken from any tool output: line 154 is `for stream in Product.objects.all().order_by(\"name\")` and the body issues four separate queries per stream \u2014 a values_list at 155, an aggregate at 160, a `.first()` at 175-182 and a `.count()` at 186. Any of those lines is this defect.",
+    "file": "tcms/core/views.py",
+    "startLine": 154,
+    "endLine": 190,
+    "lines": [
+      154,
+      156,
+      160,
+      176,
+      186
+    ],
+    "enclosingSymbol": "stream report view",
+    "trigger": "request-handler",
+    "loopDepth": 1,
+    "category": "n-plus-one",
+    "severity": "high",
+    "queriesNow": "four queries per product, unbounded by product count",
+    "queriesAfter": "one grouped aggregate over all products",
+    "why": "Four queries run per iteration of `for stream in Product.objects.all()`.",
+    "outputIdentical": true
+  }
+]

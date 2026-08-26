@@ -1,0 +1,337 @@
+{
+  "_comment": [
+    "Finding-level adjudication of run-4 on mt-test-studio @ 36972b38.",
+    "",
+    "TWO PASSES, AND THEY DISAGREED. The first asked 'is the inefficiency real'. The second, run",
+    "independently with no sight of the first, also asked 'would the proposed code actually run' --",
+    "and that question overturned several verdicts. Spot-checked against source: finding 3's",
+    "proposal references an attribute that appears nowhere in the repository, and finding 9",
+    "replaces a queryset with a list that property_matrix() then calls .order_by() on. Both would",
+    "raise AttributeError. The second pass is authoritative here because its claims were checkable",
+    "and were checked.",
+    "",
+    "firstPassVerdict is retained so the disagreement stays visible rather than being tidied away.",
+    "adjudicated is still false: two model passes agreeing is not a human confirming.",
+    "",
+    "WHAT THIS EXPOSED. The value gate has no viability check. It tests for no-ops, wrong",
+    "direction, non-data-access, cold paths, immateriality and contradicted assumptions -- but not",
+    "whether the proposal references symbols that exist. Findings 3 and 9 are mechanically",
+    "detectable and were published anyway."
+  ],
+  "run": "run-4",
+  "adjudicatedBy": "two independent model passes; second authoritative; pending human confirmation",
+  "adjudicated": false,
+  "disagreements": 10,
+  "verdicts": [
+    {
+      "n": 1,
+      "file": "tcms/core/views.py",
+      "line": 154,
+      "verdict": "wrong",
+      "why": "The loop at core/views.py:154 is a genuine per-product N+1, but the proposal only groups active-run counts and never replaces the cited TestExecution.aggregate() (lines 160-166); dropped as written the view breaks (agg undefined), and it adds a needless Product.objects.all() subquery. Unusable rewrite.",
+      "confidence": "medium",
+      "firstPassVerdict": "real",
+      "agreed": false
+    },
+    {
+      "n": 2,
+      "file": "tcms/core/admin_views.py",
+      "line": 1028,
+      "verdict": "wrong",
+      "why": "proposed/rationale/equivalenceArgument are all empty strings. No actionable change, and the cited exists() in the plan import loop is not addressed.",
+      "confidence": "high",
+      "firstPassVerdict": "wrong",
+      "agreed": true
+    },
+    {
+      "n": 3,
+      "file": "tcms/testplans/views.py",
+      "line": 479,
+      "verdict": "wrong",
+      "why": "create_execution() (testruns/models.py:145-181) is not a thin insert: it resolves the assignee, queries TestExecutionStatus, reads case.history.latest() for the NOT-NULL case_text_version, expands the property matrix and inserts TestExecutionProperty rows. The proposal also references new_run.execution_model, which does not exist anywhere in the repo, so bulk_create would crash and would violate NOT NULL if it ran.",
+      "confidence": "high",
+      "firstPassVerdict": "real",
+      "agreed": false
+    },
+    {
+      "n": 4,
+      "file": "tcms/core/admin_views.py",
+      "line": 950,
+      "verdict": "wrong",
+      "why": "admin_views.py:949-958 already ends in .values_list(\"global_id\", flat=True); the proposal only swaps map/filter for a list comprehension. Identical SQL, zero DB change, and the claimed over-fetch does not exist.",
+      "confidence": "high",
+      "firstPassVerdict": "marginal",
+      "agreed": false
+    },
+    {
+      "n": 5,
+      "file": "tcms/core/views.py",
+      "line": 502,
+      "verdict": "real",
+      "why": "core/views.py:501-509 materializes every distinct TestExecution.case_id into a Python set and then feeds it back as pk__in; executed_case_ids is not used again in that view (lines 511-537), so pushing it into a subquery removes one round trip and the full id transfer.",
+      "confidence": "high",
+      "firstPassVerdict": "real",
+      "agreed": true
+    },
+    {
+      "n": 6,
+      "file": "tcms/testcases/views.py",
+      "line": 352,
+      "verdict": "marginal",
+      "why": "testcases/views.py:352 iterates the queryset exactly once; wrapping it in list() issues the same single query. DB work identical, only Python-level explicitness changes (the rationale admits as much).",
+      "confidence": "high",
+      "firstPassVerdict": "real",
+      "agreed": false
+    },
+    {
+      "n": 7,
+      "file": "tcms/testplans/views.py",
+      "line": 381,
+      "verdict": "real",
+      "why": "testplans/views.py:380-388 runs a values_list query to build run_ids and then a second aggregate; filtering on run__plan_id collapses this to one query with the same aggregate columns.",
+      "confidence": "high",
+      "firstPassVerdict": "real",
+      "agreed": true
+    },
+    {
+      "n": 8,
+      "file": "tcms/core/context_processors.py",
+      "line": 31,
+      "verdict": "wrong",
+      "why": "context_processors.py:36-48 iterates streams at line 48 (next(...) over it) inside the same function, so removing list() saves nothing and still executes one query. Worse, it moves evaluation outside the try/except OperationalError|ProgrammingError block that the comment says exists to stop 500-cascades on an unmigrated DB.",
+      "confidence": "high",
+      "firstPassVerdict": "wrong",
+      "agreed": true
+    },
+    {
+      "n": 9,
+      "file": "tcms/testruns/models.py",
+      "line": 165,
+      "verdict": "wrong",
+      "why": "properties is a union() queryset and property_matrix() calls properties.order_by(\"name\",\"value\") (models.py:189). Passing list(...) as proposed raises AttributeError, so the rewrite is not runnable; the stated assumption that property_matrix accepts an evaluated iterable is false.",
+      "confidence": "high",
+      "firstPassVerdict": "real",
+      "agreed": false
+    },
+    {
+      "n": 10,
+      "file": "tcms/kiwi_auth/management/commands/backfill_user_names.py",
+      "line": 40,
+      "verdict": "wrong",
+      "why": "pk__isnull=False is an always-true predicate on a Django PK; it adds a redundant WHERE clause and changes no rows and no index choice. Explicit no-op (and the command is a cold management path anyway).",
+      "confidence": "high",
+      "firstPassVerdict": "wrong",
+      "agreed": true
+    },
+    {
+      "n": 11,
+      "file": "tcms/testcases/forms.py",
+      "line": 364,
+      "verdict": "wrong",
+      "why": "forms.py:364-367 executes no queries at all: plan_ids is a lazy values_list used as an IN subquery, and both querysets are only assigned to form fields. values_list(\"plan\") and (\"plan_id\") produce identical SQL, and adding distinct() to a subquery does not reduce work. The claimed 'pulling whole plan objects' never happens.",
+      "confidence": "high",
+      "firstPassVerdict": "marginal",
+      "agreed": false
+    },
+    {
+      "n": 12,
+      "file": "tcms/testruns/views.py",
+      "line": 316,
+      "verdict": "real",
+      "why": "testruns/views.py:315-322 does TestCasePlan.objects.get(plan=..., case=case) once per case inside the loop; batching into one filter(case__in=...) dict is a genuine N+1 fix. Note the proposal drops the matrix_type kwarg present at line 328, so it needs care.",
+      "confidence": "high",
+      "firstPassVerdict": "real",
+      "agreed": true
+    },
+    {
+      "n": 13,
+      "file": "tcms/core/admin_views.py",
+      "line": 1048,
+      "verdict": "real",
+      "why": "admin_views.py:1046-1049 runs TestRun.objects.filter(global_id=...).exists() once per imported run inside the nested plan/run loops; one batched global_id__in lookup replaces N queries.",
+      "confidence": "high",
+      "firstPassVerdict": "real",
+      "agreed": true
+    },
+    {
+      "n": 14,
+      "file": "tcms/core/admin_views.py",
+      "line": 1055,
+      "verdict": "real",
+      "why": "admin_views.py:1052-1060 issues a user lookup per tester-bearing run inside the import loop; a single username__in map removes the per-row query and username is unique on the default User model.",
+      "confidence": "high",
+      "firstPassVerdict": "real",
+      "agreed": true
+    },
+    {
+      "n": 15,
+      "file": "tcms/core/admin_views.py",
+      "line": 1081,
+      "verdict": "real",
+      "why": "admin_views.py:1079-1084 does user_model.objects.filter(username=assignee_name).first() once per execution in the innermost loop \u2014 the highest-multiplicity N+1 in this importer. Batching is a genuine win.",
+      "confidence": "high",
+      "firstPassVerdict": "real",
+      "agreed": true
+    },
+    {
+      "n": 16,
+      "file": "tcms/core/views.py",
+      "line": 183,
+      "verdict": "real",
+      "why": "core/views.py:186 runs TestCase.objects.filter(section__product=stream).count() inside the per-product loop; a single values_list(\"section__product\").annotate(Count) grouped query yields the same integer per stream in one pass.",
+      "confidence": "high",
+      "firstPassVerdict": "real",
+      "agreed": true
+    },
+    {
+      "n": 17,
+      "file": "tcms/core/views.py",
+      "line": 598,
+      "verdict": "real",
+      "why": "Same per-stream count inside the CSV export loop at core/views.py:598; the grouped precompute removes one query per product.",
+      "confidence": "high",
+      "firstPassVerdict": "real",
+      "agreed": true
+    },
+    {
+      "n": 18,
+      "file": "tcms/testplans/views.py",
+      "line": 513,
+      "verdict": "wrong",
+      "why": "testplans/views.py:515 the exists() check is functional idempotency for the four fixed standard runs, not an inefficiency; deleting it creates duplicate TestRun rows (no unique constraint on plan+summary is added). Four indexed lookups is not a defect worth trading correctness for.",
+      "confidence": "medium",
+      "firstPassVerdict": "real",
+      "agreed": false
+    },
+    {
+      "n": 19,
+      "file": "tcms/core/views.py",
+      "line": 877,
+      "verdict": "real",
+      "why": "core/views.py:877-883 issues two count() queries per Section inside the loop; the grouped values(\"section_id\").annotate(...) with a filtered Count replaces 2N queries with one.",
+      "confidence": "high",
+      "firstPassVerdict": "real",
+      "agreed": true
+    },
+    {
+      "n": 20,
+      "file": "tcms/core/views.py",
+      "line": 176,
+      "verdict": "marginal",
+      "why": "One query before, one after. TestExecution.stop_date has db_index=True (testruns/models.py:310), so ORDER BY stop_date DESC LIMIT 1 can stop early while MAX() over the joined set is not obviously cheaper. Cannot defend a real reduction either way; it also leaves the surrounding per-stream loop untouched.",
+      "confidence": "medium",
+      "firstPassVerdict": "real",
+      "agreed": false
+    },
+    {
+      "n": 21,
+      "file": "tcms/core/views.py",
+      "line": 588,
+      "verdict": "marginal",
+      "why": "Same construct at core/views.py:587-594 in the CSV export loop; single query either way, indexed stop_date makes the ORDER BY/LIMIT plan competitive with MAX(). No demonstrable DB-work reduction.",
+      "confidence": "medium",
+      "firstPassVerdict": "real",
+      "agreed": false
+    },
+    {
+      "n": 22,
+      "file": "tcms/core/views.py",
+      "line": 856,
+      "verdict": "real",
+      "why": "core/views.py:856-865 issues four separate count() queries over the same TestCase/section__product filter; one aggregate with filtered Counts is 1 round trip and 1 scan instead of 4.",
+      "confidence": "high",
+      "firstPassVerdict": "real",
+      "agreed": true
+    },
+    {
+      "n": 23,
+      "file": "tcms/telemetry/api.py",
+      "line": 28,
+      "verdict": "real",
+      "why": "telemetry/api.py:28-31 runs two count() queries on the same distinct queryset; a single aggregate with two filtered distinct Counts returns both values in one round trip.",
+      "confidence": "high",
+      "firstPassVerdict": "real",
+      "agreed": true
+    },
+    {
+      "n": 24,
+      "file": "tcms/testcases/views.py",
+      "line": 1073,
+      "verdict": "real",
+      "why": "testcases/views.py:1073-1080 fires up to two sibling exists() queries on the same product/parent scope; one name__in query covers both candidates. Minor but genuine (saves a round trip whenever the desired name is taken).",
+      "confidence": "medium",
+      "firstPassVerdict": "real",
+      "agreed": true
+    },
+    {
+      "n": 25,
+      "file": "tcms/core/views.py",
+      "line": 512,
+      "verdict": "real",
+      "why": "core/views.py:512-520 is three count() queries over the same base filter; one aggregate with three filtered Counts is a real 3-to-1 round-trip reduction.",
+      "confidence": "high",
+      "firstPassVerdict": "real",
+      "agreed": true
+    },
+    {
+      "n": 26,
+      "file": "tcms/core/forms/fields.py",
+      "line": 40,
+      "verdict": "wrong",
+      "why": "Splitting get(Q(email=value) | Q(username=value)) into two sequential filter().first() calls issues MORE round trips in the username-match case, and it also swallows MultipleObjectsReturned. The tool's own equivalence note concedes it is not equivalent.",
+      "confidence": "high",
+      "firstPassVerdict": "wrong",
+      "agreed": true
+    },
+    {
+      "n": 27,
+      "file": "tcms/kiwi_auth/admin.py",
+      "line": 220,
+      "verdict": "real",
+      "why": "kiwi_auth/admin.py:222 counts every superuser row; since the branch is already guarded by user.is_superuser, exclude(pk=user.pk).exists() is logically identical and lets MySQL stop at the first matching row instead of counting all. Small but genuine.",
+      "confidence": "medium",
+      "firstPassVerdict": "real",
+      "agreed": true
+    },
+    {
+      "n": 28,
+      "file": "tcms/rpc/tests/test_testplan.py",
+      "line": 324,
+      "verdict": "real-cold",
+      "why": "rpc/tests/test_testplan.py:321-325 is a real nested-loop count() N+1, but it lives in a test method, so it never runs in production.",
+      "confidence": "high",
+      "firstPassVerdict": "real-cold",
+      "agreed": true
+    },
+    {
+      "n": 29,
+      "file": "tcms/kiwi_auth/tests/test_admin.py",
+      "line": 219,
+      "verdict": "wrong",
+      "why": "kiwi_auth/tests/test_admin.py:220 asserts exactly one superuser remains. The proposal replaces that with filter(pk=self.admin.pk).exists(), asserted against 1 \u2014 a vacuous True==1 check that destroys the test's purpose while saving no round trip (one indexed query either way, on a two-row table).",
+      "confidence": "medium",
+      "firstPassVerdict": "wrong",
+      "agreed": true
+    },
+    {
+      "n": 30,
+      "file": "tcms/tests/factories.py",
+      "line": 167,
+      "verdict": "wrong",
+      "why": "tests/factories.py:167-168 already emits a single LIMIT 1 query via .all()[0:1]; .first() is the same one query and additionally injects ORDER BY pk on an unordered model. No DB work removed, and the tool itself notes the exception behaviour differs.",
+      "confidence": "medium",
+      "firstPassVerdict": "real-cold",
+      "agreed": false
+    },
+    {
+      "n": 31,
+      "file": "tcms/kiwi_auth/tests/test_sso.py",
+      "line": 88,
+      "verdict": "real-cold",
+      "why": "test_sso.py:88-89 evaluates User.objects.filter(email=EMAIL) twice (count() then first()); list()-ing it once removes one round trip. Genuine, but it is test code.",
+      "confidence": "high",
+      "firstPassVerdict": "real-cold",
+      "agreed": true
+    }
+  ]
+}

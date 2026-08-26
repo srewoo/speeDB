@@ -8,6 +8,23 @@ export interface DetectRule {
   confidence: number
   /** Restrict to these file extensions when the signal is language-specific. */
   extensions?: string[]
+  /**
+   * Where this rule is allowed to match. Default `'code-and-strings'`.
+   *
+   * Detection used to run on raw bytes, so `# TODO: migrate to opensearch` in a
+   * comment set the engine label for the whole span it sat in, and commented-out
+   * code produced candidates for code that no longer runs. *Comments are now
+   * masked for every rule* — that is not optional and there is no opt-out,
+   * because a comment is never a query.
+   *
+   * String bodies are a different question. A SQL, CQL or Cypher statement
+   * lives inside a string literal by definition, so masking strings would
+   * blind almost every dialect rule — hence the default. `'code'` is the
+   * opt-in for rules that match a bare engine *name*, where a string body is
+   * never the signal and prose like "we should move this to Athena" is a false
+   * positive waiting to happen.
+   */
+  scope?: 'code' | 'code-and-strings'
 }
 
 const SQL_VERBS = String.raw`SELECT|INSERT\s+INTO|UPDATE|DELETE\s+FROM|WITH\s+[\w"]+\s+AS|MERGE\s+INTO|UPSERT\s+INTO`
@@ -52,35 +69,58 @@ export const RULES: DetectRule[] = [
   },
   { name: 'postgres-placeholder', pattern: /(?:SELECT|INSERT|UPDATE|DELETE)[\s\S]{0,600}?\$\d+/gi,
     engine: 'postgres', accessStyle: 'raw-sql', confidence: 0.85 },
-  { name: 'postgres-dialect', pattern: /\bON\s+CONFLICT\b|\bRETURNING\s+\w+|::\w+\[\]|\bILIKE\b|\bLATERAL\s+JOIN\b|\bjsonb_\w+/gi,
-    engine: 'postgres', accessStyle: 'raw-sql', confidence: 0.8 },
-  { name: 'mysql-dialect', pattern: /\b(?:ON\s+DUPLICATE\s+KEY\s+UPDATE|STRAIGHT_JOIN|SQL_CALC_FOUND_ROWS|GROUP_CONCAT)\b/gi,
+  {
+    name: 'postgres-dialect',
+    // Case-sensitive on the keyword half, and deliberately so. `RETURNING`,
+    // `ON CONFLICT`, `ILIKE` and `LATERAL JOIN` are all ordinary English in
+    // lower case — "a returning browser", "probes connect by IP" — and matching
+    // them case-insensitively labelled prose in docstrings and changelogs as
+    // Postgres. SQL keywords are conventionally upper case; a lower-case query
+    // is still detected by the rules that find the statement, it just takes its
+    // engine from the repository profile instead, which is the better evidence
+    // anyway. The punctuation and identifier forms stay case-insensitive
+    // because no English sentence contains them.
+    pattern: new RegExp(
+      // `::int[]` has no letters to case, and `jsonb_` functions are lower
+      // case by Postgres convention, so both are safe without a flag. V8 has no
+      // inline `(?i:…)` group, which is why this is split by hand.
+      String.raw`\bON\s+CONFLICT\b|\bRETURNING\s+[\w"*]+|\bILIKE\b|\bLATERAL\s+JOIN\b` +
+      String.raw`|::\w+\[\]|\bjsonb_\w+`,
+      'g',
+    ),
+    engine: 'postgres', accessStyle: 'raw-sql', confidence: 0.8,
+  },
+  { name: 'mysql-dialect', pattern: /\b(?:ON\s+DUPLICATE\s+KEY\s+UPDATE|STRAIGHT_JOIN|SQL_CALC_FOUND_ROWS|GROUP_CONCAT)\b/g,
     engine: 'mysql', accessStyle: 'raw-sql', confidence: 0.85 },
   { name: 'mssql-dialect', pattern: /\bSELECT\s+TOP\s+\d+|WITH\s*\(\s*NOLOCK\s*\)|OPTION\s*\(\s*RECOMPILE|\bOUTPUT\s+INSERTED\b/gi,
     engine: 'mssql', accessStyle: 'raw-sql', confidence: 0.85 },
-  { name: 'oracle-dialect', pattern: /\bROWNUM\b|\bCONNECT\s+BY\b|\bDUAL\b|\bNVL\s*\(|\bMERGE\s+INTO\s+\w+\s+USING\b/gi,
+  // Case-sensitive: "connect by", "dual" and "merge into" are all English.
+  { name: 'oracle-dialect', pattern: /\bROWNUM\b|\bCONNECT\s+BY\b|\bDUAL\b|\bNVL\s*\(|\bMERGE\s+INTO\s+\w+\s+USING\b/g,
     engine: 'oracle', accessStyle: 'raw-sql', confidence: 0.8 },
   { name: 'sqlite-dialect', pattern: /\bsqlite3?\s*\.\s*(?:connect|Database)\s*\(|\bPRAGMA\s+\w+/gi,
     engine: 'sqlite', accessStyle: 'raw-sql', confidence: 0.85 },
 
   /* ======================================================= warehouse == */
-  { name: 'snowflake', pattern: /\bQUALIFY\b|\bLATERAL\s+FLATTEN\b|\bSNOWFLAKE\.ACCOUNT_USAGE\b|\bWAREHOUSE\s*=|\bCOPY\s+INTO\s+@|\bsnowflake\.connector\b/gi,
+  { name: 'snowflake', pattern: /\bQUALIFY\b|\bLATERAL\s+FLATTEN\b|\bSNOWFLAKE\.ACCOUNT_USAGE\b|\bWAREHOUSE\s*=|\bCOPY\s+INTO\s+@|\bsnowflake\.connector\b/g,
     engine: 'snowflake', accessStyle: 'raw-sql', confidence: 0.9 },
   { name: 'bigquery', pattern: /\bbigquery\b|\bBigQueryClient\b|`[\w-]+\.[\w-]+\.[\w-]+`|_PARTITIONTIME|_TABLE_SUFFIX|\bTABLESAMPLE\s+SYSTEM\b/gi,
     engine: 'bigquery', accessStyle: 'raw-sql', confidence: 0.85 },
   { name: 'redshift', pattern: /\bDISTKEY\b|\bSORTKEY\b|\bDISTSTYLE\b|\bUNLOAD\s+\(|\bredshift\b/gi,
     engine: 'redshift', accessStyle: 'raw-sql', confidence: 0.85 },
-  { name: 'synapse', pattern: /\b(?:CREATE\s+TABLE\s+.*WITH\s*\(\s*DISTRIBUTION|synapse)\b/gi,
+  { name: 'synapse',
+    scope: 'code', pattern: /\b(?:CREATE\s+TABLE\s+.*WITH\s*\(\s*DISTRIBUTION|synapse)\b/gi,
     engine: 'synapse', accessStyle: 'raw-sql', confidence: 0.8 },
   { name: 'databricks-delta', pattern: /\bOPTIMIZE\s+\w+\s+ZORDER\b|\bdelta\.`|\bDeltaTable\b|\bspark\.read\.format\(["']delta/gi,
     engine: 'databricks', accessStyle: 'raw-sql', confidence: 0.85 },
-  { name: 'athena', pattern: /\b(?:athena|start_query_execution|AwsDataCatalog)\b/gi,
+  { name: 'athena',
+    scope: 'code', pattern: /\b(?:athena|start_query_execution|AwsDataCatalog)\b/gi,
     engine: 'athena', accessStyle: 'raw-sql', confidence: 0.8 },
-  { name: 'clickhouse', pattern: /\bPREWHERE\b|\bMergeTree\b|\bclickhouse\b|\bSETTINGS\s+max_threads\b/gi,
+  { name: 'clickhouse', pattern: /\bPREWHERE\b|\bMergeTree\b|\bSETTINGS\s+max_threads\b|\bclickhouse\b/g,
     engine: 'clickhouse', accessStyle: 'raw-sql', confidence: 0.9 },
 
   /* ================================================ big data / hadoop == */
-  { name: 'hive', pattern: /\bHiveContext\b|\bCREATE\s+EXTERNAL\s+TABLE\b|\bSTORED\s+AS\s+(?:PARQUET|ORC|TEXTFILE)\b|\bSORT\s+BY\b|\bDISTRIBUTE\s+BY\b|\bMSCK\s+REPAIR\b/gi,
+  // Case-sensitive: "sort by" and "distribute by" are English phrases.
+  { name: 'hive', pattern: /\bHiveContext\b|\bCREATE\s+EXTERNAL\s+TABLE\b|\bSTORED\s+AS\s+(?:PARQUET|ORC|TEXTFILE)\b|\bSORT\s+BY\b|\bDISTRIBUTE\s+BY\b|\bMSCK\s+REPAIR\b/g,
     engine: 'hive', accessStyle: 'raw-sql', confidence: 0.9 },
   { name: 'hive-file', pattern: /\b(?:SELECT|INSERT\s+OVERWRITE|CREATE\s+TABLE)\b/gi,
     engine: 'hive', accessStyle: 'raw-sql', confidence: 0.95, extensions: ['hql', 'q'] },
@@ -88,9 +128,11 @@ export const RULES: DetectRule[] = [
     engine: 'spark', accessStyle: 'raw-sql', confidence: 0.85 },
   { name: 'spark-dataframe', pattern: /\bdf\s*\.\s*(?:select|filter|where|groupBy|join|withColumn|agg)\s*\(/g,
     engine: 'spark', accessStyle: 'query-builder', confidence: 0.75, extensions: [...PY, 'scala', 'java'] },
-  { name: 'trino-presto', pattern: /\b(?:trino|presto|prestodb)\b|\bcatalog\.schema\.table\b/gi,
+  { name: 'trino-presto',
+    scope: 'code', pattern: /\b(?:trino|presto|prestodb)\b|\bcatalog\.schema\.table\b/gi,
     engine: 'trino', accessStyle: 'raw-sql', confidence: 0.8 },
-  { name: 'impala', pattern: /\b(?:impala|impyla)\b|\bCOMPUTE\s+STATS\b/gi,
+  { name: 'impala',
+    scope: 'code', pattern: /\b(?:impala|impyla)\b|\bCOMPUTE\s+STATS\b/gi,
     engine: 'impala', accessStyle: 'raw-sql', confidence: 0.8 },
   { name: 'hbase', pattern: /\bnew\s+Scan\s*\(|\bHTable\b|\bsetStartRow\b|\bsetStopRow\b|\bhappybase\b|\bGet\s*\(\s*Bytes\.toBytes/g,
     engine: 'hbase', accessStyle: 'kv-command', confidence: 0.85 },
@@ -100,8 +142,13 @@ export const RULES: DetectRule[] = [
   /* ====================================================== document == */
   {
     name: 'mongodb-pipeline',
-    pattern: /\$(?:lookup|unwind|match|group|facet|graphLookup|bucket|addFields)\b|\.\s*aggregate\s*\(/g,
-    engine: 'mongodb', accessStyle: 'aggregation-pipeline', confidence: 0.9,
+    // A bare `.aggregate(` is not a Mongo signal: Django, SQLAlchemy and
+    // ActiveRecord all define it, and because this rule outranked `django-orm`
+    // on confidence, `Product.objects.aggregate(...)` in a Django project was
+    // classified as a MongoDB aggregation pipeline. A pipeline is identified by
+    // its stage operators, or by an aggregate call taking an array literal.
+    pattern: /\$(?:lookup|unwind|match|group|facet|graphLookup|bucket|addFields|project|sortByCount|replaceRoot)\b|\.\s*aggregate\s*\(\s*\[/g,
+    engine: 'mongodb', accessStyle: 'aggregation-pipeline', confidence: 0.8,
   },
   {
     name: 'mongodb-crud',
@@ -140,22 +187,39 @@ export const RULES: DetectRule[] = [
     engine: 'firestore', accessStyle: 'rest-data-api', confidence: 0.85 },
   { name: 'cosmosdb', pattern: /\b(?:CosmosClient|RequestCharge|PartitionKey|EnableCrossPartitionQuery)\b/g,
     engine: 'cosmosdb', accessStyle: 'rest-data-api', confidence: 0.85 },
-  { name: 'couchdb', pattern: /\b(?:couchdb|Mango)\b|_design\/|\bselector\s*:\s*\{/gi,
+  { name: 'couchdb',
+    scope: 'code', pattern: /\b(?:couchdb|Mango)\b|_design\/|\bselector\s*:\s*\{/gi,
     engine: 'couchdb', accessStyle: 'rest-data-api', confidence: 0.75 },
 
   /* =================================================== wide column == */
-  { name: 'cassandra-cql', pattern: /\bALLOW\s+FILTERING\b|\bUSING\s+TTL\b|\bcassandra\b|\bexecute_concurrent\b|SimpleStatement/gi,
-    engine: 'cassandra', accessStyle: 'raw-sql', confidence: 0.9 },
+  {
+    name: 'cassandra-cql',
+    // "Allow filtering by TestRun ID" is a changelog entry, not CQL.
+    pattern: new RegExp(
+      String.raw`\bALLOW\s+FILTERING\b|\bUSING\s+TTL\b|\bSimpleStatement\b` +
+      String.raw`|\b[Cc]assandra\b|\bexecute_concurrent\b`,
+      'g',
+    ),
+    engine: 'cassandra', accessStyle: 'raw-sql', confidence: 0.9,
+  },
   { name: 'cql-file', pattern: /\b(?:SELECT|INSERT\s+INTO|CREATE\s+(?:TABLE|KEYSPACE))\b/gi,
     engine: 'cassandra', accessStyle: 'ddl-migration', confidence: 0.95, extensions: ['cql'] },
-  { name: 'scylla', pattern: /\b(?:scylla|shard_aware)\b/gi, engine: 'scylla', accessStyle: 'raw-sql', confidence: 0.8 },
+  { name: 'scylla',
+    scope: 'code', pattern: /\b(?:scylla|shard_aware)\b/gi, engine: 'scylla', accessStyle: 'raw-sql', confidence: 0.8 },
   { name: 'bigtable', pattern: /\b(?:bigtable|read_rows|RowSet|row_key_prefix)\b/g,
     engine: 'bigtable', accessStyle: 'kv-command', confidence: 0.85 },
 
   /* ================================================ key-value / memory == */
   { name: 'redis-scan-risk',
     // KEYS and FLUSHALL are the two commands that take a production Redis down.
-    pattern: /\.\s*(?:keys|flushall|flushdb)\s*\(|["'`]KEYS\s+\*/gi,
+    // The receiver constraint is not optional: a bare `.keys(` matched every
+    // `Object.keys(` in the repository, which is how a Django project acquired
+    // Redis findings. The sibling `redis` rule already anchors this way.
+    pattern: new RegExp(
+      String.raw`\b(?:redis|jedis|ioredis|redisClient|redis_client|cache|rdb|conn)\s*\.\s*(?:keys|flushall|flushdb)\s*\(` +
+      String.raw`|["'\x60]\s*(?:KEYS\s+\*|FLUSHALL|FLUSHDB)`,
+      'gi',
+    ),
     engine: 'redis', accessStyle: 'kv-command', confidence: 0.9 },
   {
     name: 'redis',
@@ -170,9 +234,11 @@ export const RULES: DetectRule[] = [
     ),
     engine: 'redis', accessStyle: 'kv-command', confidence: 0.85,
   },
-  { name: 'memcached', pattern: /\b(?:memcache|pylibmc|get_multi|Memcached)\b/gi,
+  { name: 'memcached',
+    scope: 'code', pattern: /\b(?:memcache|pylibmc|get_multi|Memcached)\b/gi,
     engine: 'memcached', accessStyle: 'kv-command', confidence: 0.8 },
-  { name: 'etcd', pattern: /\b(?:etcd|clientv3)\b|\bWithPrefix\(\)/g, engine: 'etcd', accessStyle: 'kv-command', confidence: 0.8 },
+  { name: 'etcd',
+    scope: 'code', pattern: /\b(?:etcd|clientv3)\b|\bWithPrefix\(\)/g, engine: 'etcd', accessStyle: 'kv-command', confidence: 0.8 },
   { name: 'hazelcast-ignite', pattern: /\b(?:Hazelcast|IgniteCache|SqlFieldsQuery)\b|\bIMap</g,
     engine: 'hazelcast', accessStyle: 'query-builder', confidence: 0.8, extensions: JVM },
 
@@ -181,8 +247,19 @@ export const RULES: DetectRule[] = [
     engine: 'neo4j', accessStyle: 'graph-traversal', confidence: 0.9 },
   { name: 'cypher-file', pattern: /\b(?:MATCH|MERGE|CREATE)\s*\(/g,
     engine: 'neo4j', accessStyle: 'graph-traversal', confidence: 0.95, extensions: ['cypher', 'cyp'] },
-  { name: 'gremlin', pattern: /\bg\s*\.\s*V\s*\(|\.\s*(?:outE|inV|bothE|repeat|until|hasLabel)\s*\(/g,
-    engine: 'neptune', accessStyle: 'graph-traversal', confidence: 0.85 },
+  {
+    name: 'gremlin',
+    // `until` and `repeat` are generic words, and as bare method names they
+    // matched SCSS module calls — `breakpoint.until(...)`, `list.repeat(...)` —
+    // making stylesheets the single largest false-positive category in the
+    // corpus. A Gremlin step only counts alongside a traversal source.
+    pattern: new RegExp(
+      String.raw`\bg\s*\.\s*V\s*\(|\btraversal\s*\(\s*\)|\bGraphTraversalSource\b` +
+      String.raw`|\.\s*(?:outE|inE|outV|inV|bothE|bothV|hasLabel|valueMap)\s*\(`,
+      'g',
+    ),
+    engine: 'neptune', accessStyle: 'graph-traversal', confidence: 0.85,
+  },
   { name: 'aql-sparql', pattern: /\bFOR\s+\w+\s+IN\s+\w+[\s\S]{0,200}?RETURN\b|\bPREFIX\s+\w+:\s*</g,
     engine: 'arangodb', accessStyle: 'graph-traversal', confidence: 0.8 },
 
@@ -200,14 +277,32 @@ export const RULES: DetectRule[] = [
     ),
     engine: 'elasticsearch', accessStyle: 'search-dsl', confidence: 0.82,
   },
-  { name: 'opensearch', pattern: /\bopensearch(?:py|\-js)?\b/gi, engine: 'opensearch', accessStyle: 'search-dsl', confidence: 0.85 },
-  { name: 'solr', pattern: /\b(?:solr|SolrQuery|[?&]fq=|[?&]defType=)\b/gi, engine: 'solr', accessStyle: 'search-dsl', confidence: 0.8 },
+  {
+    name: 'opensearch',
+    scope: 'code',
+    // The bare word matched prose. `# TODO: migrate to opensearch` in a comment
+    // set the engine for the whole span it sat in. Masking handles the comment;
+    // this requires an actual import or client construction on top of it.
+    pattern: new RegExp(
+      String.raw`\bfrom\s+opensearchpy\s+import\b|\bimport\s+opensearchpy\b` +
+      String.raw`|\brequire\s*\(\s*['"\x60]@opensearch-project\/` +
+      String.raw`|\bfrom\s+['"\x60]@opensearch-project\/` +
+      String.raw`|\bnew\s+OpenSearchClient\s*\(|\bOpenSearch\s*\(\s*\{` +
+      String.raw`|\borg\.opensearch\.client\b`,
+      'g',
+    ),
+    engine: 'opensearch', accessStyle: 'search-dsl', confidence: 0.85,
+  },
+  { name: 'solr',
+    scope: 'code', pattern: /\b(?:solr|SolrQuery|[?&]fq=|[?&]defType=)\b/gi, engine: 'solr', accessStyle: 'search-dsl', confidence: 0.8 },
 
   /* ========================================================= vector == */
   {
     name: 'pgvector',
     // <-> <=> <#> are the pgvector distance operators.
-    pattern: /(?:<->|<=>|<#>)|\bvector\s*\(\s*\d+\s*\)|\bivfflat\b|\bhnsw\b|ef_search|SET\s+ivfflat\.probes/gi,
+    // `Bug<->Tag` in a docstring is an ASCII arrow, not a distance operator.
+    // In real pgvector SQL the operator is spaced: `embedding <-> $1`.
+    pattern: /(?:\s(?:<->|<=>|<#>)\s)|\bvector\s*\(\s*\d+\s*\)|\bivfflat\b|\bhnsw\b|ef_search|SET\s+ivfflat\.probes/gi,
     engine: 'pgvector', accessStyle: 'vector-search', confidence: 0.92,
   },
   { name: 'pinecone', pattern: /\b(?:pinecone|topK|top_k)\b|\.\s*upsert\s*\(\s*vectors/gi,
@@ -230,9 +325,11 @@ export const RULES: DetectRule[] = [
     engine: 'timescaledb', accessStyle: 'timeseries-query', confidence: 0.9 },
   { name: 'promql', pattern: /\b(?:rate|irate|histogram_quantile|increase)\s*\(\s*\w+\{|prometheus_client|PromQL/g,
     engine: 'prometheus', accessStyle: 'timeseries-query', confidence: 0.85 },
-  { name: 'druid', pattern: /\bdruid\b|__time\b|\bgranularity\s*:\s*["']/gi,
+  { name: 'druid',
+    scope: 'code', pattern: /\bdruid\b|__time\b|\bgranularity\s*:\s*["']/gi,
     engine: 'druid', accessStyle: 'timeseries-query', confidence: 0.8 },
-  { name: 'questdb', pattern: /\bquestdb\b|\bSAMPLE\s+BY\b|\bLATEST\s+ON\b/gi,
+  { name: 'questdb',
+    scope: 'code', pattern: /\bquestdb\b|\bSAMPLE\s+BY\b|\bLATEST\s+ON\b/gi,
     engine: 'questdb', accessStyle: 'timeseries-query', confidence: 0.85 },
 
   /* ================================================ object / embedded == */
@@ -331,7 +428,9 @@ export const RULES: DetectRule[] = [
   {
     name: 'sql-string-building',
     // The variable itself announces the intent.
-    pattern: /(?:sql|query|stmt|statement|q)\s*(?:\+=|\.=|<<=|=\s*\w+\s*\+)/gi,
+    // `\b` on both sides is load-bearing: without the leading one, any
+    // identifier ending in `q` — `seq`, `faq`, `uniq` — matched.
+    pattern: /\b(?:sql|query|stmt|statement|q)\b\s*(?:\+=|\.=|<<=|=\s*\w+\s*\+)/gi,
     engine: 'unknown', accessStyle: 'raw-sql', confidence: 0.72,
   },
 
