@@ -68,7 +68,7 @@ export class GeminiProvider implements LlmProvider {
             temperature: req.temperature,
             maxOutputTokens: req.maxOutputTokens,
             responseMimeType: 'application/json',
-            ...(req.jsonSchema ? { responseSchema: req.jsonSchema } : {}),
+            ...(req.schema ? { responseSchema: forGemini(req.schema.schema) } : {}),
           },
         }),
       })
@@ -102,4 +102,33 @@ export class GeminiProvider implements LlmProvider {
 interface GeminiBody {
   candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string }[]
   usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number }
+}
+
+
+/**
+ * Gemini's `responseSchema` is an OpenAPI 3.0 subset, not JSON Schema.
+ *
+ * It accepts `type`, `format`, `description`, `nullable`, `enum`, `items`,
+ * `properties` and `required`, and rejects the request outright on anything
+ * else — `additionalProperties` in particular, which the strict triage schema
+ * carries because OpenAI requires it. Sending one document to both providers is
+ * worth a small translation here; sending two documents would let them drift.
+ */
+const GEMINI_KEYS = new Set([
+  'type', 'format', 'description', 'nullable', 'enum', 'items', 'properties', 'required',
+])
+
+function forGemini(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(forGemini)
+  if (node === null || typeof node !== 'object') return node
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+    if (!GEMINI_KEYS.has(k)) continue
+    out[k] = k === 'properties'
+      ? Object.fromEntries(
+          Object.entries(v as Record<string, unknown>).map(([pk, pv]) => [pk, forGemini(pv)]),
+        )
+      : forGemini(v)
+  }
+  return out
 }

@@ -15,6 +15,9 @@ import {
 } from './analyze/triage'
 import { AUTHOR_SYSTEM_PROMPT, buildAuthorPrompt, reconcileAuthoring } from './analyze/author'
 import { parseFindings } from './analyze/parse'
+import {
+  AUTHOR_SCHEMA, SINGLE_SHOT_SCHEMA, TRIAGE_SCHEMA, type ResponseSchema,
+} from './analyze/schemas'
 import { groundFindings } from './analyze/ground'
 import { buildSchemaFacts } from './analyze/schema-facts'
 import { findRelevantFiles, sampleRelevantFile } from './detect/relevance'
@@ -24,8 +27,9 @@ import {
 } from './providers'
 import {
   cacheKey, chunkKey, hashChunk, readCache, readChunkCache, writeCache, writeChunkCache,
+  type AnalysisConfig,
 } from './report/cache'
-import { findModel } from '@/config/models'
+import { DEFAULTS, findModel } from '@/config/models'
 import { estimateCost, type CostEstimate } from '@/config/pricing'
 
 export interface ScanOptions extends ProviderConfig {
@@ -235,11 +239,21 @@ export async function runScan(parsed: ParsedRepoUrl, opts: ScanOptions): Promise
   // Checked here, after resolving the ref to a commit SHA but before any file
   // fetching. Resolution costs two API calls; a hit then skips several hundred
   // file reads and every LLM pass. Keyed by SHA, so a new commit never hits.
+  // Every knob that changes the analysis is in the key. Resolving the defaults
+  // *here* rather than passing the raw options matters: a caller that omits
+  // `triageSamples` and one that passes the default must produce the same key,
+  // or turning a default into an explicit value would evict every cached scan.
   const key = cacheKey({
     commitSha: repo.commitSha,
     provider: opts.provider,
     model: opts.model,
     scope: opts.pullRequest !== undefined ? `pr-${opts.pullRequest}` : 'repo',
+    config: {
+      sitesPerPass: opts.maxCandidatesPerChunk,
+      triageSamples: Math.max(1, opts.triageSamples ?? DEFAULTS.triageSamples),
+      minPriority: opts.minPriority,
+      mode: opts.analysis ?? 'two-stage',
+    } as AnalysisConfig,
   })
 
   if (!opts.noCache) {
@@ -606,7 +620,7 @@ export async function runScan(parsed: ParsedRepoUrl, opts: ScanOptions): Promise
        * named in the estimate rather than buried in it.
        */
       const perTriagePass = opts.triageSitesPerPass ?? 60
-      const samples = Math.max(1, opts.triageSamples ?? 1)
+      const samples = Math.max(1, opts.triageSamples ?? DEFAULTS.triageSamples)
       const triagePasses: Candidate[][] = []
       for (let i = 0; i < candidates.length; i += perTriagePass) {
         triagePasses.push(candidates.slice(i, i + perTriagePass))
@@ -698,9 +712,17 @@ export async function runScan(parsed: ParsedRepoUrl, opts: ScanOptions): Promise
   const budgetSpent = () => promptTokens + completionTokens
 
   /** Shared by both strategies: one model call, cached, with token accounting. */
-  const complete = async (system: string, user: string, cacheSeed: string[]) => {
+  const complete = async (
+    system: string,
+    user: string,
+    cacheSeed: string[],
+    schema?: ResponseSchema,
+  ) => {
+    // The schema is part of the cache identity. A response produced without one
+    // and a response the provider guaranteed are different artefacts, and
+    // serving the first for the second would hide the change that was just made.
     const ckey = chunkKey({
-      hash: hashChunk(cacheSeed),
+      hash: hashChunk([...cacheSeed, schema ? `schema:${schema.name}` : 'schema:none']),
       provider: opts.provider,
       model: opts.model,
     })
@@ -718,6 +740,7 @@ export async function runScan(parsed: ParsedRepoUrl, opts: ScanOptions): Promise
       user,
       temperature: opts.temperature,
       maxOutputTokens: opts.maxOutputTokens,
+      schema,
       signal: opts.signal,
     })
     promptTokens += res.promptTokens
@@ -736,7 +759,7 @@ export async function runScan(parsed: ParsedRepoUrl, opts: ScanOptions): Promise
     // against the ids that were sent, so a skipped site is a visible failure
     // rather than a silent "clean".
     const perTriagePass = opts.triageSitesPerPass ?? 60
-    const samples = Math.max(1, opts.triageSamples ?? 1)
+    const samples = Math.max(1, opts.triageSamples ?? DEFAULTS.triageSamples)
     const triagePasses: Candidate[][] = []
     for (let i = 0; i < candidates.length; i += perTriagePass) {
       triagePasses.push(candidates.slice(i, i + perTriagePass))
@@ -749,6 +772,10 @@ export async function runScan(parsed: ParsedRepoUrl, opts: ScanOptions): Promise
     })
 
     const flagged = new Map<string, TriageVerdict>()
+    /** Site id -> how many samples flagged it. Denominator in `support`. */
+    const agreement = new Map<string, number>()
+    /** Site id -> how many samples ran for the pass that site was in. */
+    const support = new Map<string, { flagged: number; samples: number }>()
 
     for (const [index, pass] of triagePasses.entries()) {
       throwIfAborted(opts.signal)
@@ -769,13 +796,26 @@ export async function runScan(parsed: ParsedRepoUrl, opts: ScanOptions): Promise
       // accounting, and seeing what a second opinion flags. Accounting was
       // always complete after the first sample, so sampling never happened.
       const missing = new Set(ids)
+      // How many samples actually returned a usable verdict for this pass.
+      // The denominator of the agreement ratio has to be the number of samples
+      // that *ran*, not the number requested: a pass where two of three calls
+      // failed would otherwise report every site as 1/3-supported, which is a
+      // statement about the network rather than about the site.
+      let samplesCompleted = 0
       for (let sample = 0; sample < samples; sample++) {
         try {
-          const { text } = await complete(TRIAGE_SYSTEM_PROMPT, user, [...seed, `sample:${sample}`])
+          const { text } = await complete(TRIAGE_SYSTEM_PROMPT, user, [...seed, `sample:${sample}`], TRIAGE_SCHEMA)
           const parsed = parseTriage(text, ids)
+          samplesCompleted++
           for (const id of flaggedIds(parsed)) {
             const v = parsed.verdicts.find((x) => x.id === id)!
             if (!flagged.has(id)) flagged.set(id, v)
+            // The union decides what gets authored; the count decides how much
+            // to trust it. Keeping only the union threw away a signal that was
+            // already computed and free: a site three of three samples flagged
+            // and a site one of three flagged reached authoring as identical
+            // evidence.
+            agreement.set(id, (agreement.get(id) ?? 0) + 1)
           }
           for (const v of parsed.verdicts) {
             missing.delete(v.id)
@@ -809,6 +849,14 @@ export async function runScan(parsed: ParsedRepoUrl, opts: ScanOptions): Promise
         if (!flagged.has(id)) {
           flagged.set(id, { id, verdict: 'unsure', category: 'other', why: 'triage returned no verdict for this site' })
         }
+      }
+
+      // Freeze the support ratio for every site in this pass, now that its
+      // sample count is final. An escalated site records 0 of N: it was never
+      // flagged by anyone, it is here because nobody answered, and recording it
+      // as supported would be a lie in the direction that matters.
+      for (const id of ids) {
+        support.set(id, { flagged: agreement.get(id) ?? 0, samples: Math.max(1, samplesCompleted) })
       }
 
       sitesSent += pass.length
@@ -871,7 +919,7 @@ export async function runScan(parsed: ParsedRepoUrl, opts: ScanOptions): Promise
         const covered = new Set<string>()
 
         for (let attempt = 0; attempt < attempts; attempt++) {
-          const { text } = await complete(AUTHOR_SYSTEM_PROMPT, user, [...seed, `attempt:${attempt}`])
+          const { text } = await complete(AUTHOR_SYSTEM_PROMPT, user, [...seed, `attempt:${attempt}`], AUTHOR_SCHEMA)
           acc = reconcileAuthoring(text, batchIds, sites)
 
           const fresh = parseFindings(text).findings
@@ -879,7 +927,12 @@ export async function runScan(parsed: ParsedRepoUrl, opts: ScanOptions): Promise
             const id = acc.authored[k] ?? `${f.primaryOccurrence.file}:${f.primaryOccurrence.startLine}`
             if (covered.has(id)) continue
             covered.add(id)
-            raw.push(f)
+            // Carry the triage agreement onto the finding. It is computed
+            // whether or not anything reads it, and without it the report has
+            // no way to distinguish a site every sample flagged from one a
+            // single sample flagged and the others called clean.
+            const s = support.get(id)
+            raw.push(s ? { ...f, triageSupport: s } : f)
           }
 
           // A site that came back with neither a finding nor a decline is the
@@ -920,7 +973,7 @@ export async function runScan(parsed: ParsedRepoUrl, opts: ScanOptions): Promise
       ]
 
       try {
-        const { text } = await complete(SYSTEM_PROMPT, user, seed)
+        const { text } = await complete(SYSTEM_PROMPT, user, seed, SINGLE_SHOT_SCHEMA)
         sitesSent += chunk.length
         raw.push(...parseFindings(text).findings)
       } catch (e) {

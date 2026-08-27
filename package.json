@@ -13,7 +13,7 @@
     "test:watch": "vitest",
     "package": "npm run build && node scripts/package.mjs",
     "package:debug": "npm run build && node scripts/package.mjs --with-maps",
-    "release": "npm run test && npm run package",
+    "release": "npm run test && npm run bench:gate && npm run package",
     "store:icons": "python3 store/make-icons.py",
     "store:html": "node store/build-html.mjs",
     "store:verify": "node store/verify.mjs",
@@ -22,7 +22,8 @@
     "bench": "node bench/score.mjs",
     "bench:detect": "node bench/detect.mjs",
     "bench:scan": "node bench/scan.mjs",
-    "bench:pin": "node bench/pin.mjs"
+    "bench:pin": "node bench/pin.mjs",
+    "bench:gate": "node bench/gate.mjs"
   },
   "dependencies": {
     "react": "^19.0.0",

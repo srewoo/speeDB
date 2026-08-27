@@ -34,6 +34,20 @@ interface CacheEntry {
  * never a stale-branch problem. Provider and model are in it too: the same
  * commit analysed by a different model is a different result, and serving one
  * for the other would be misleading.
+ *
+ * `PROMPT_VERSION` and the analysis config are in it for the same reason, and
+ * their absence was a real defect rather than a missing nicety. The key used to
+ * be `sha:provider:model:scope`, so editing a prompt — the single most common
+ * change made to this product — left every cached scan of that commit serving
+ * results from the *previous* prompt for the next hour. Every measurement taken
+ * inside that window silently compared a new prompt against old output. The
+ * chunk cache already carried `PROMPT_VERSION`; the scan cache, which sits in
+ * front of it and short-circuits the whole pipeline, did not.
+ *
+ * The same argument applies to `sitesPerPass`, `triageSamples`, the confidence
+ * floor and temperature: each changes the analysis, so each must change the
+ * identity of its result. They are folded into one short fingerprint rather
+ * than concatenated, so adding a knob later does not keep lengthening the key.
  */
 export function cacheKey(input: {
   commitSha: string
@@ -41,8 +55,51 @@ export function cacheKey(input: {
   model: string
   /** A pull-request-scoped scan is a different result from a whole-repo one. */
   scope?: string
+  /** Everything about *how* the analysis was run. See `analysisFingerprint`. */
+  config?: AnalysisConfig
 }): string {
-  return `${input.commitSha}:${input.provider}:${input.model}:${input.scope ?? 'repo'}`
+  const cfg = analysisFingerprint(input.config)
+  return [
+    `v${PROMPT_VERSION}`,
+    input.commitSha,
+    input.provider,
+    input.model,
+    input.scope ?? 'repo',
+    cfg,
+  ].join(':')
+}
+
+/**
+ * The knobs that change what an analysis produces.
+ *
+ * Deliberately not `Settings`: theme and `maxOutputTokens` do not change the
+ * findings, and including them would evict a cache on a colour change.
+ */
+export interface AnalysisConfig {
+  sitesPerPass?: number
+  triageSamples?: number
+  /** The priority floor applied before analysis. */
+  minPriority?: number
+  /** Two-stage triage/authoring versus the single-shot path. */
+  mode?: string
+}
+
+/**
+ * A short, stable fingerprint of the analysis config.
+ *
+ * Sorted by key so property order cannot produce two fingerprints for one
+ * config, and hashed so the key length is fixed however many knobs exist.
+ * Undefined values are dropped rather than stringified, so a caller that omits
+ * a knob and one that passes its default agree — the default is resolved
+ * before this is called.
+ */
+export function analysisFingerprint(config?: AnalysisConfig): string {
+  if (!config) return 'default'
+  const entries = Object.entries(config)
+    .filter(([, v]) => v !== undefined)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([k, v]) => `${k}=${v}`)
+  return entries.length === 0 ? 'default' : hashChunk(entries)
 }
 
 async function readAll(): Promise<CacheEntry[]> {
@@ -135,8 +192,18 @@ export async function cacheSummary(): Promise<{ count: number; oldestAgeMs: numb
 
 const CHUNK_KEY = 'speedb.chunkCache'
 
-/** Bumped whenever the prompt changes, so stale results cannot be reused. */
-export const PROMPT_VERSION = 2
+/**
+ * Bumped whenever anything that changes a finding changes.
+ *
+ * Not only the prompt text, despite the name it was given: enforced response
+ * schemas, sampled triage, the support-derived severity cap and the
+ * claim-specific verification recipes all change what a scan produces from the
+ * same commit. Now also part of `cacheKey`, which it was not — see there.
+ *
+ * 3: structured output enforced on every adapter, triage sampled by default,
+ *    triage agreement carried onto findings, per-category recipes.
+ */
+export const PROMPT_VERSION = 3
 
 /** Chunks are small; more of them fit, and each is cheaper to lose. */
 const MAX_CHUNK_ENTRIES = 400

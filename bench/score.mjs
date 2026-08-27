@@ -177,7 +177,9 @@ function collectRuns(dir) {
  * averaged in — a metric absent from every run stays absent.
  */
 function aggregate(scored) {
-  const keys = Object.keys(scored[0].metrics)
+  // Booleans are flags, not metrics — averaging one produces a number that
+  // means nothing and would print as a percentage.
+  const keys = Object.keys(scored[0].metrics).filter((k) => typeof scored[0].metrics[k] !== 'boolean')
   const metrics = {}
   const spread = {}
   for (const k of keys) {
@@ -189,7 +191,7 @@ function aggregate(scored) {
   const last = scored[scored.length - 1]
   return {
     ...last,
-    metrics,
+    metrics: { ...metrics, precisionIsFloor: scored.some((s) => s.metrics.precisionIsFloor) },
     spread,
     published: Math.round(scored.reduce((a, s) => a + s.published, 0) / scored.length),
     suppressed: Math.round(scored.reduce((a, s) => a + s.suppressed, 0) / scored.length),
@@ -270,12 +272,23 @@ function score(report, truth, repo, adjudication, runPath) {
       // land on a listed defect.
       precision: adjudicatedPrecision(adjudication, runPath, report)
         ?? (total === 0 ? (repo.control ? 1 : null) : ratio(truePositives, total)),
+      // Whether that number is precision at all.
+      //
+      // With an adjudication for *this* run it is: every published finding has
+      // a verdict. Without one it is the defect-truth fallback, which can only
+      // credit a finding that lands on an entry in a list of known defects —
+      // three, for mt-test-studio. Forty-three findings against a three-item
+      // list cannot exceed about 7% however good they are, so the number is a
+      // floor and reporting it as precision blames the tool for the size of the
+      // truth file. Named here so the gate can say which it is looking at.
+      precisionIsFloor: adjudicatedPrecision(adjudication, runPath, report) === null && total > 0,
       recallAtHigh: highTruth.length === 0 ? null : ratio(highFound.length, highTruth.length),
       noOpRate: ratio(noOps, total),
       // Measured on what was PUBLISHED. A suppressed no-op or wrong-direction
       // finding is the gate working; a published one is the failure the gate
       // exists to prevent, and only the second belongs in a rate.
       wrongDirectionRate: ratio(published.filter(goesWrongWay).length, total),
+      directionUnverifiableRate: ratio(published.filter(directionUnverifiable).length, total),
       nonDataAccessRate: ratio(published.filter((f) => !touchesData(f)).length, total),
       coldPathShare: ratio(coldPath, total),
       engineAccuracy: engineOk,
@@ -295,14 +308,49 @@ function score(report, truth, repo, adjudication, runPath) {
   }
 }
 
-/** A round-trip claim whose proposal does not actually reduce the round trips. */
+/**
+ * A round-trip claim whose proposal does not actually reduce the round trips.
+ *
+ * Requires a count to compare, and that condition is not a softening — it is
+ * the difference between a measurement and an artefact. `0 >= 0` is true and
+ * says nothing: it fires whenever neither excerpt evaluates anything, which is
+ * the normal shape of a lazy queryset assignment and the guaranteed shape of a
+ * mapping declaration.
+ *
+ * Checked against the mt-test-studio run rather than assumed. All five findings
+ * this flagged were 0-vs-0, and one of them —
+ * `tcms/testruns/views.py:535`, adding `prefetch_related("executions")` to a
+ * `get_object_or_404` — is a genuine round-trip reduction. It scored as "wrong
+ * direction" only because `get_object_or_404` is not in the Django evaluator
+ * list, so both sides counted zero. A metric that calls a real improvement a
+ * defect is measuring its own blind spot.
+ *
+ * The uninformative cases are not discarded: `directionUnverifiable` counts
+ * them separately, so narrowing this cannot quietly hide a population.
+ */
 function goesWrongWay(f) {
   if (!ROUND_TRIP.has(f.category)) return false
   const a = readOrmShape(f.original ?? '', f.scope ?? null)
   const b = readOrmShape(f.suggestion?.proposed ?? '', f.scope ?? null)
   if (!a || !b) return false
+  if (a.queryCount === 0 && b.queryCount === 0) return false
   const escapesLoop = a.perIteration && !b.perIteration
   return b.queryCount >= a.queryCount && !escapesLoop
+}
+
+/**
+ * A round-trip claim neither excerpt gives a count for.
+ *
+ * Not a defect and not a pass — an unverifiable claim, tracked so that
+ * narrowing `goesWrongWay` moves findings into a visible bucket rather than
+ * out of the report.
+ */
+function directionUnverifiable(f) {
+  if (!ROUND_TRIP.has(f.category)) return false
+  const a = readOrmShape(f.original ?? '', f.scope ?? null)
+  const b = readOrmShape(f.suggestion?.proposed ?? '', f.scope ?? null)
+  if (!a || !b) return false
+  return a.queryCount === 0 && b.queryCount === 0
 }
 
 /** Neither version is a statement or ORM data access — so it is not our finding. */
@@ -359,7 +407,20 @@ for (const row of rows) {
       continue
     }
     const ok = dir === 'gte' ? value >= gate : value <= gate
-    if (!ok) failures.push(`${row.repo.id}: ${label} ${pct(value)} vs gate ${pct(gate)}.`)
+    if (!ok) {
+      // A floor that misses the gate is not a failed precision measurement, and
+      // saying so is the same discipline as refusing to report green without a
+      // pinned commit: an unadjudicated run is not a measured one.
+      const isFloor = key === 'precision' && row.metrics.precisionIsFloor
+      failures.push(
+        isFloor
+          ? `${row.repo.id}: Precision was not measured — no adjudication for this run. ` +
+            `The defect-truth floor is ${pct(value)} against a ${row.truthEntries}-entry truth file, ` +
+            `which ${row.published} findings cannot exceed by much however good they are. ` +
+            'Adjudicate the run (bench/AUDIT_PROMPT.md) to get a precision figure.'
+          : `${row.repo.id}: ${label} ${pct(value)} vs gate ${pct(gate)}.`,
+      )
+    }
   }
 }
 
@@ -388,13 +449,14 @@ const out = [
 
 if (rows.length > 0) {
   out.push(
-    '| Repo | Config | Published | Suppressed | Precision | Recall @ high | Candidate cov. | Engine acc. | Counted facts | No-op | Wrong dir. | Non-data |',
-    '| --- | --- | --: | --: | --: | --: | --: | --: | --: | --: | --: | --: |',
+    '| Repo | Config | Published | Suppressed | Precision | Recall @ high | Candidate cov. | Engine acc. | Counted facts | No-op | Wrong dir. | Dir. unverif. | Non-data |',
+    '| --- | --- | --: | --: | --: | --: | --: | --: | --: | --: | --: | --: | --: |',
     ...rows.map((r) => [
       r.runs > 1 ? `${r.repo.id} (${r.runs} runs)` : r.repo.id, r.label ?? '—', r.published, r.suppressed,
       span(r.metrics.precision, r.spread.precision), span(r.metrics.recallAtHigh, r.spread.recallAtHigh), span(r.metrics.candidateCoverage, r.spread.candidateCoverage),
       span(r.metrics.engineAccuracy, r.spread.engineAccuracy), span(r.metrics.countedFactCoverage, r.spread.countedFactCoverage),
-      span(r.metrics.noOpRate, r.spread.noOpRate), span(r.metrics.wrongDirectionRate, r.spread.wrongDirectionRate), span(r.metrics.nonDataAccessRate, r.spread.nonDataAccessRate),
+      span(r.metrics.noOpRate, r.spread.noOpRate), span(r.metrics.wrongDirectionRate, r.spread.wrongDirectionRate),
+      span(r.metrics.directionUnverifiableRate, r.spread.directionUnverifiableRate), span(r.metrics.nonDataAccessRate, r.spread.nonDataAccessRate),
     ].join(' | ')).map((line) => `| ${line} |`),
     '',
     '## Coverage, as reported',
@@ -435,6 +497,29 @@ await server.close()
 const resultPath = resolve(BENCH, 'results', `${stamp}.md`)
 mkdirSync(dirname(resultPath), { recursive: true })
 writeFileSync(resultPath, out.join('\n'))
+
+/*
+ * A machine-readable twin of the report, for `bench/gate.mjs`.
+ *
+ * The markdown is for people and stays the record of what happened. The release
+ * gate needs three facts it cannot reliably scrape from prose — did every repo
+ * get scored, did every gate pass, and *which build was this measured against* —
+ * so they are written explicitly. The fingerprint is the load-bearing one: it
+ * is what stops a green result from before a prompt rewrite being read as a
+ * green result for the build being packaged.
+ */
+const { analysisFingerprint } = await import('./fingerprint.mjs')
+writeFileSync(
+  resolve(BENCH, 'results', 'latest.json'),
+  JSON.stringify({
+    stamp,
+    fingerprint: analysisFingerprint().digest,
+    repos: rows.length,
+    failures,
+    problems,
+    llm: !noLlm,
+  }, null, 2) + '\n',
+)
 
 console.log(out.join('\n'))
 console.log(`\nWritten to bench/results/${stamp}.md`)

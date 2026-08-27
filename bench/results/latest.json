@@ -1,0 +1,15 @@
+{
+  "stamp": "2026-08-27",
+  "fingerprint": "39924b399088d9e1",
+  "repos": 3,
+  "failures": [
+    "mt-test-studio: Precision was not measured — no adjudication for this run. The defect-truth floor is 14% against a 3-entry truth file, which 43 findings cannot exceed by much however good they are. Adjudicate the run (bench/AUDIT_PROMPT.md) to get a precision figure.",
+    "mt-test-studio: Counted-fact coverage 74% vs gate 80%."
+  ],
+  "problems": [
+    "discourse: no truth file at bench/truth/discourse/7766dc04d0f74088d3f3bf0689b688fd017f9d03.json — run the audit in bench/AUDIT_PROMPT.md.",
+    "cal.com: no truth file at bench/truth/cal.com/176037d0afbe572f870a3c702985e7cd83fe6c0c.json — run the audit in bench/AUDIT_PROMPT.md.",
+    "gitea: no truth file at bench/truth/gitea/90c43e8e782e303aff163d35b3f54522292b8258.json — run the audit in bench/AUDIT_PROMPT.md."
+  ],
+  "llm": true
+}

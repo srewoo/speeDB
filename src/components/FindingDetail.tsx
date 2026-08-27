@@ -171,6 +171,52 @@ export function FindingDetail({
               </div>
             ))}
 
+            {/*
+              * What would prove it right, and what would prove it wrong.
+              *
+              * The second half is the one that matters. A command with no
+              * stated failure condition can be run, produce any output at all,
+              * and be read as agreement — which is how a verification step
+              * turns into a ritual. Naming the refutation makes "this finding
+              * was wrong" a reachable answer rather than an absence of one.
+              */}
+            {finding.performance.confirms.length > 0 ? (
+              <div className="panel">
+                <div className="panel__body stack-2">
+                  <strong className="t-micro dim2">
+                    {finding.performance.measures
+                      ? `Measures: ${finding.performance.measures}`
+                      : 'What to look for in the output'}
+                  </strong>
+                  <ul className="stack-2">
+                    {finding.performance.confirms.map((c, i) => (
+                      <li key={i} className="t-body-sm">✓ {c}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            ) : null}
+
+            {finding.performance.refutes.length > 0 ? (
+              <div className="panel">
+                <div className="panel__body stack-2">
+                  <strong className="t-micro dim2">What would show this finding is wrong</strong>
+                  <ul className="stack-2">
+                    {finding.performance.refutes.map((r, i) => (
+                      <li key={i} className="t-body-sm dim">✗ {r}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            ) : null}
+
+            {finding.performance.noRecipeReason ? (
+              <div className="callout callout--warn">
+                <span className="callout__icon"><IconAlert size={15} /></span>
+                <div className="t-body-sm">{finding.performance.noRecipeReason}</div>
+              </div>
+            ) : null}
+
             <div className="panel">
               <div className="panel__body stack-2">
                 <strong className="t-micro dim2">What to look for in the output</strong>

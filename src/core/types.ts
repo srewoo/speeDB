@@ -230,6 +230,25 @@ export interface Finding {
    */
   modelSeverity?: Severity
 
+  /**
+   * How many triage samples flagged this site, out of how many ran.
+   *
+   * Sampled triage runs the same pass N times and authors the union — a site
+   * only has to be flagged once to get written up, which is what keeps recall
+   * up. But the union threw away the count, so a site 3 of 3 samples called a
+   * problem and a site 1 of 3 flagged while the other two called it clean
+   * arrived at authoring, at severity, and at the report as identical evidence.
+   *
+   * The count is already computed and costs nothing to keep. It is a confidence
+   * signal about the *site*, not about the argument — which is why it caps
+   * severity and feeds the value gate rather than deciding either on its own. A
+   * weakly-supported site with three counted facts is still a real finding; a
+   * weakly-supported site with none is the shape of a guess.
+   *
+   * Absent on the single-shot path, which has no triage stage to sample.
+   */
+  triageSupport?: { flagged: number; samples: number }
+
   grounding: GroundingStatus
   /** Human-readable reasons the grounding pass flagged this. */
   groundingNotes: string[]

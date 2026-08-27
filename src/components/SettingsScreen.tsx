@@ -267,6 +267,25 @@ function AiTab() {
           ) : null}
 
           <Field
+            label="Thoroughness" id="triage-samples"
+            hint={
+              settings.triageSamples <= 1
+                ? 'Fast runs triage once. Measured at 16% precision against 52% for Standard — the same repository, model and prompt. Use it only to sanity-check a change cheaply.'
+                : 'Triage runs this many times and the union is analysed. Run-to-run variance was the largest error term in the benchmark, and sampling is the direct answer to it. Triage is ~30 tokens per site, so three samples cost less than one write-up.'
+            }
+          >
+            <select
+              id="triage-samples" className="input"
+              value={settings.triageSamples}
+              onChange={(e) => void updateSettings({ triageSamples: Number(e.target.value) })}
+            >
+              <option value={1}>Fast — triage once</option>
+              <option value={3}>Standard — triage 3×, union (recommended)</option>
+              <option value={5}>Deep — triage 5×, union</option>
+            </select>
+          </Field>
+
+          <Field
             label={
               tempSupported
                 ? `Temperature — ${settings.temperature.toFixed(2)}`

@@ -4,6 +4,7 @@ import type { ArchiveResult, RepoClient } from '../repo/client'
 import type { LlmProvider, LlmRequest } from '../providers'
 import type { RepoRef } from '../types'
 import { clearCache } from '../report/cache'
+import { DEFAULTS } from '@/config/models'
 
 /* --------------------------------------------------------- test doubles -- */
 
@@ -175,6 +176,21 @@ const BASE = {
    * behaviour has its own tests further down.
    */
   authorSitesPerRequest: 3,
+  /*
+   * Triage samples pinned for the same reason, and it is the same trade-off.
+   *
+   * The product default is 3 — see DEFAULTS.triageSamples, which is one of the
+   * few numbers here backed by a measurement rather than an argument. But it
+   * multiplies the triage call count, and the tests below assert exact call
+   * counts, token totals and cache-reuse figures. Inheriting it would make
+   * every one of those assertions a statement about the sampling default
+   * instead of about the thing under test, and a future change to the default
+   * would break tests that have nothing to do with sampling.
+   *
+   * The default itself, and the sampling behaviour, are asserted directly in
+   * 'triage is sampled by default' below.
+   */
+  triageSamples: 1,
 }
 
 /* Chrome storage stub — the pipeline reads and writes both caches. */
@@ -601,12 +617,48 @@ describe('runScan — two-stage analysis', () => {
     expect(new Set(provider.seen.authorIds.flat()).size).toBe(3)
   })
 
-  it('sampling once is the default, so nobody pays for it unasked', async () => {
+  it('triage is sampled by default, because the unsampled default was the worse one', async () => {
+    /*
+     * This used to assert the opposite — that triage runs once unless asked —
+     * on the reasoning that nobody should pay for sampling unasked.
+     *
+     * The benchmark disagreed, and it is the only thing here with a number.
+     * Same repository, same model, same two-stage configuration:
+     *
+     *   1 sample  (4 runs)  precision 16% (0-32%)   recall @ high  63% (0-100%)
+     *   2 samples            precision 52%           recall @ high 100%
+     *
+     * Sampling was the largest effect measured anywhere in that table, and it
+     * shipped switched off behind an option with no UI. Triage costs ~30 tokens
+     * a site, so three samples of it cost less than one authoring request — the
+     * cost being avoided was smaller than the accuracy being given up.
+     *
+     * The assertion is on DEFAULTS rather than a literal, so this test fails if
+     * the default is changed without the reasoning above being revisited.
+     */
     const provider = recordingProvider((ids) => ({
       verdicts: ids.map((id) => ({ id, verdict: 'clean', category: 'other', why: '' })),
     }))
     const client = fakeClient({ fetchArchive: async () => ({ files: manySites.slice(0, 3), bytes: 1 }) })
-    await runScan(parsed, { ...BASE, triageSitesPerPass: 10, deps: { client, provider } })
+
+    // Note: no `triageSamples` — this is the one test that inherits the default.
+    const { triageSamples: _pinned, ...withoutPin } = BASE
+    await runScan(parsed, { ...withoutPin, triageSitesPerPass: 10, deps: { client, provider } })
+
+    expect(DEFAULTS.triageSamples).toBe(3)
+    expect(provider.seen.samples).toBe(DEFAULTS.triageSamples)
+  })
+
+  it('honours an explicit request for a single sample', async () => {
+    // Fast mode is still reachable, and still cheaper. It is a choice now
+    // rather than the default.
+    const provider = recordingProvider((ids) => ({
+      verdicts: ids.map((id) => ({ id, verdict: 'clean', category: 'other', why: '' })),
+    }))
+    const client = fakeClient({ fetchArchive: async () => ({ files: manySites.slice(0, 3), bytes: 1 }) })
+    await runScan(parsed, {
+      ...BASE, triageSitesPerPass: 10, triageSamples: 1, deps: { client, provider },
+    })
     expect(provider.seen.samples).toBe(1)
   })
 })

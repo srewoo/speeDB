@@ -41,7 +41,7 @@ function asFinding(r: Row): Finding {
     performance: {
       status: 'unmeasured',
       counted: Array.from({ length: r.countedFacts }, (_, i) => `fact ${i}`),
-      unmeasured: [], verification: [], lookFor: [], summary: '',
+      unmeasured: [], verification: [], lookFor: [], confirms: [], refutes: [], summary: '',
     },
     grounding: 'verified', groundingNotes: [], modelConfidence: 0.5,
   }

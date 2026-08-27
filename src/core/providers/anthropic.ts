@@ -65,6 +65,23 @@ export class AnthropicProvider implements LlmProvider {
           temperature: req.temperature,
           system: req.system,
           messages: [{ role: 'user', content: req.user }],
+          // Anthropic has no `response_format`. A forced tool call is how a
+          // shape is enforced here: the model must call `emit`, and `input` is
+          // validated against `input_schema` before it comes back. This adapter
+          // previously sent no schema of any kind — it was the only one with no
+          // structured-output path at all — so every response was free text and
+          // a stray sentence before the JSON was a parse repair at best and a
+          // lost pass at worst.
+          ...(req.schema
+            ? {
+                tools: [{
+                  name: req.schema.name,
+                  description: 'Return the analysis result. This is the only way to answer.',
+                  input_schema: req.schema.schema,
+                }],
+                tool_choice: { type: 'tool', name: req.schema.name },
+              }
+            : {}),
         }),
       })
     } catch (e) {
@@ -75,10 +92,21 @@ export class AnthropicProvider implements LlmProvider {
     if (!res.ok) throw await mapError(res)
 
     const body = (await res.json()) as AnthropicBody
-    const text = (body.content ?? [])
-      .filter((b) => b.type === 'text')
-      .map((b) => b.text ?? '')
-      .join('')
+
+    // With a forced tool call the answer is the tool input, not a text block —
+    // `content` carries a `tool_use` and usually no text at all. Re-serialising
+    // it hands `analyze/parse.ts` exactly what it expects from every other
+    // adapter, so the parsing path stays single. Text is still read as a
+    // fallback: a refusal, a `max_tokens` stop, or a model that ignored the
+    // forced choice all arrive as text, and returning '' for those would turn a
+    // diagnosable failure into an empty pass.
+    const toolInput = (body.content ?? []).find((b) => b.type === 'tool_use')?.input
+    const text = toolInput !== undefined
+      ? JSON.stringify(toolInput)
+      : (body.content ?? [])
+          .filter((b) => b.type === 'text')
+          .map((b) => b.text ?? '')
+          .join('')
 
     if (body.stop_reason === 'refusal') {
       throw new LlmError('The model declined to analyse this content.', 'refusal')
@@ -93,7 +121,7 @@ export class AnthropicProvider implements LlmProvider {
 }
 
 interface AnthropicBody {
-  content?: { type: string; text?: string }[]
+  content?: { type: string; text?: string; input?: unknown }[]
   stop_reason?: string
   usage?: { input_tokens?: number; output_tokens?: number }
 }

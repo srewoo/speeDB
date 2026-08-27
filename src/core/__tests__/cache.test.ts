@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  CACHE_TTL_MS, cacheKey, cacheSummary, clearCache, readCache, writeCache,
+  CACHE_TTL_MS, cacheKey, cacheSummary, clearCache, PROMPT_VERSION, readCache, writeCache,
 } from '../report/cache'
 import type { ScanReport } from '../types'
 
@@ -43,12 +43,61 @@ function report(id: string): ScanReport {
 }
 
 describe('cacheKey', () => {
+  const base = { commitSha: 'abc', provider: 'anthropic', model: 'claude-sonnet-5' }
+
   it('separates results by commit, provider and model', () => {
-    const base = { commitSha: 'abc', provider: 'anthropic', model: 'claude-sonnet-5' }
     expect(cacheKey(base)).toBe(cacheKey({ ...base }))
     expect(cacheKey(base)).not.toBe(cacheKey({ ...base, commitSha: 'def' }))
     expect(cacheKey(base)).not.toBe(cacheKey({ ...base, model: 'claude-opus-5' }))
     expect(cacheKey(base)).not.toBe(cacheKey({ ...base, provider: 'openai' }))
+  })
+
+  it('separates results by prompt version', () => {
+    /*
+     * The defect this exists for: the key was `sha:provider:model:scope`, so
+     * editing a prompt — the most common change made to this product — left
+     * every cached scan of that commit serving the previous prompt's output for
+     * the next hour. Every measurement taken inside that window compared a new
+     * prompt against old results, silently. The chunk cache already carried
+     * PROMPT_VERSION; the scan cache, which sits in front of it and
+     * short-circuits the entire pipeline, did not.
+     */
+    expect(cacheKey(base)).toContain(`v${PROMPT_VERSION}`)
+  })
+
+  it('separates results by analysis config', () => {
+    // Each of these changes what the analysis produces, so each must change the
+    // identity of its result.
+    const std = { ...base, config: { triageSamples: 3, sitesPerPass: 25, mode: 'two-stage' } }
+    expect(cacheKey(std)).toBe(cacheKey({ ...std }))
+    expect(cacheKey(std)).not.toBe(cacheKey({ ...std, config: { ...std.config, triageSamples: 1 } }))
+    expect(cacheKey(std)).not.toBe(cacheKey({ ...std, config: { ...std.config, sitesPerPass: 60 } }))
+    expect(cacheKey(std)).not.toBe(cacheKey({ ...std, config: { ...std.config, mode: 'single-shot' } }))
+    expect(cacheKey(std)).not.toBe(cacheKey({ ...std, config: { ...std.config, minPriority: 0.3 } }))
+  })
+
+  it('does not depend on the property order of the config', () => {
+    // Otherwise two callers that agree on the configuration would still miss
+    // each other's cache entries, which reads as a cache that does not work.
+    const a = cacheKey({ ...base, config: { triageSamples: 3, sitesPerPass: 25 } })
+    const b = cacheKey({ ...base, config: { sitesPerPass: 25, triageSamples: 3 } })
+    expect(a).toBe(b)
+  })
+
+  it('treats an omitted knob and an explicitly-undefined one as the same', () => {
+    expect(cacheKey({ ...base, config: { triageSamples: undefined } }))
+      .toBe(cacheKey({ ...base, config: {} }))
+  })
+
+  it('keeps the key a bounded length however many knobs exist', () => {
+    // The config is hashed rather than concatenated, so adding a knob later
+    // does not keep lengthening every key.
+    const short = cacheKey({ ...base, config: { triageSamples: 3 } })
+    const long = cacheKey({
+      ...base,
+      config: { triageSamples: 3, sitesPerPass: 25, minPriority: 0.3, mode: 'two-stage' },
+    })
+    expect(long.length).toBe(short.length)
   })
 })
 

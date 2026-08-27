@@ -126,6 +126,34 @@ export const DEFAULTS = {
    * cost is the one of the two that is bounded and visible at the cost gate.
    */
   sitesPerPass: 25,
+  /**
+   * How many times each triage pass is run, taking the union of what is flagged.
+   *
+   * Three, not one, and this is the one number here backed by a measurement
+   * rather than an argument. From `bench/results/2026-08-26.md`, same repo, same
+   * model, same two-stage configuration:
+   *
+   *   1 sample  (4 runs)  precision 16% (0-32%)   recall @ high  63% (0-100%)
+   *   2 samples            precision 52%           recall @ high 100%
+   *
+   * Sampling raised precision more than three-fold *and* removed the 0% floor
+   * on recall. It is the largest effect in the whole results table - larger than
+   * two-stage versus single-shot, larger than pass size, larger than the
+   * confidence floor - because run-to-run variance was the dominant error term
+   * and sampling is the direct answer to variance.
+   *
+   * It shipped switched off. The reasoning was "nobody pays for it unasked",
+   * which is the right instinct pointed at the wrong cost: triage is ~30 tokens
+   * per site, so three samples of it cost less than a single authoring request.
+   * The default was the configuration measured at 16% precision while the one
+   * measured at 52% sat behind an option with no UI.
+   *
+   * Three rather than two because the third sample is what makes *agreement*
+   * meaningful - with two samples a site is flagged by one or both, and 1/2
+   * carries no signal. With three, 1/3 is weak and 3/3 is strong, and that
+   * gradient feeds severity and the value gate (see `triageSupport`).
+   */
+  triageSamples: 3,
 }
 
 export function findProvider(id: ProviderId): ProviderSpec {

@@ -8,6 +8,11 @@ export interface Settings {
   scanTokenBudget: number
   /** Query sites per analysis pass. Small on purpose — see DEFAULTS. */
   sitesPerPass: number
+  /**
+   * Triage passes per site; the union is authored, and the agreement across
+   * them is carried onto the finding. Measured, not assumed — see DEFAULTS.
+   */
+  triageSamples: number
   theme: 'system' | 'light' | 'dark'
 }
 
@@ -26,6 +31,7 @@ export const DEFAULT_SETTINGS: Settings = {
   maxOutputTokens: DEFAULTS.maxOutputTokens,
   scanTokenBudget: DEFAULTS.scanTokenBudget,
   sitesPerPass: DEFAULTS.sitesPerPass,
+  triageSamples: DEFAULTS.triageSamples,
   theme: 'system',
 }
 

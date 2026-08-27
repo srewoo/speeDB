@@ -34,6 +34,12 @@ export type SuppressionReason =
   | 'immaterial'
   /** The proposal names something that exists nowhere in the repository. */
   | 'invented-symbol'
+  /**
+   * Nothing supports this but the model's opinion: one triage sample in three
+   * or more flagged the site, no structural fact could be counted from the two
+   * versions, and the benefit depends on data speeDB cannot see.
+   */
+  | 'unsupported-speculation'
 
 export interface Suppression {
   reason: SuppressionReason
@@ -97,6 +103,7 @@ export function applyValueGate(findings: Finding[], input: GateInput): GateResul
   const counts: Record<SuppressionReason, number> = {
     'no-op': 0, 'wrong-direction': 0, 'not-data-access': 0,
     'cold-path': 0, 'unsupported-assumption': 0, 'immaterial': 0, 'invented-symbol': 0,
+    'unsupported-speculation': 0,
   }
 
   for (const finding of findings) {
@@ -182,8 +189,19 @@ function judge(
   }
 
   /* 2. wrong-direction — the claim is "fewer queries", so count them. */
+  //
+  // Only when there is a count to compare. `0 >= 0` is true and means nothing:
+  // it fires whenever neither snippet evaluates anything, which is the normal
+  // shape of a lazy queryset assignment and the *guaranteed* shape of a mapping
+  // declaration. On spring-petclinic that suppressed all three `FetchType`
+  // findings with "issues 0 database calls where the original issues 0" — a
+  // sentence that reads as a measurement and is an absence of one. The
+  // round-trip effect of a mapping change lives at the call sites, not in the
+  // declaration, so this rule has no evidence and must abstain rather than
+  // suppress. Other rules and the severity calculation still apply.
   if (ROUND_TRIP_CATEGORIES.has(finding.category) && ormA && ormB) {
-    if (ormB.queryCount >= ormA.queryCount && !(ormA.perIteration && !ormB.perIteration)) {
+    const hasCountToCompare = ormA.queryCount > 0 || ormB.queryCount > 0
+    if (hasCountToCompare && ormB.queryCount >= ormA.queryCount && !(ormA.perIteration && !ormB.perIteration)) {
       return {
         reason: 'wrong-direction',
         detail: `The proposal issues ${ormB.queryCount} database call(s) where the original issues ${ormA.queryCount}, so it does not reduce the round trips it claims to reduce. (Counted from the code, not measured.)`,
@@ -203,6 +221,44 @@ function judge(
     return {
       reason: 'cold-path',
       detail: `This code is reached by a ${scope!.trigger === 'test' ? 'test' : 'migration or seed'}, so it runs once at install time or never in production. The change may still be a reasonable tidy-up; it is not a performance finding.`,
+    }
+  }
+
+  /* 8. nothing supports this but the model's opinion. */
+  //
+  // Three independent signals have to be simultaneously empty for this to fire,
+  // and each is one the tool computed rather than took on the model's word:
+  //
+  //   - `performance.status === 'questionable'` — the category's benefit
+  //     depends entirely on table size, selectivity or which indexes exist in
+  //     production, none of which are visible in source code.
+  //   - zero counted facts — nothing structural could be derived from the two
+  //     versions, so there is no fallback claim underneath the speed claim.
+  //   - 1-of-3-or-more triage support — the other samples looked at this exact
+  //     site and called it clean.
+  //
+  // Any one of these alone is ordinary and publishes: a data-dependent claim
+  // with counted facts is a normal index finding, and a weakly-supported site
+  // with counted facts is the variance sampling exists to cover. All three at
+  // once is a finding whose entire content is a guess, and `countedFactCoverage`
+  // sitting at 68% against an 80% gate is largely made of them.
+  //
+  // Suppressed, not dropped — it is rendered with this reason in the collapsed
+  // section like every other gate decision, because a gate that silently eats a
+  // true positive is worse than the padding it removes.
+  const support = finding.triageSupport
+  if (
+    finding.performance?.status === 'questionable' &&
+    (finding.performance?.counted.length ?? 0) === 0 &&
+    support && support.samples >= 3 && support.flagged / support.samples < 0.5
+  ) {
+    return {
+      reason: 'unsupported-speculation',
+      detail:
+        `${support.flagged} of ${support.samples} triage samples flagged this site; the rest read the same code and ` +
+        'called it clean. No structural fact could be counted from the two versions, and the benefit of this ' +
+        `category depends on table size, selectivity and which indexes exist in production — none of which are in ` +
+        'the source. Nothing here is checkable, so it is held back rather than published as a finding.',
     }
   }
 
@@ -261,7 +317,14 @@ function judgeMateriality(
  * flagging those would reject every good rewrite. Short names are skipped
  * because they collide with everything.
  */
-const ATTRIBUTE_ACCESS = /\.\s*([a-z_][a-z0-9_]{3,})\b/gi
+const ATTRIBUTE_ACCESS = /(?:\b([A-Za-z_]\w*)\s*)?\.\s*([a-z_][a-z0-9_]{3,})\b/gi
+
+/**
+ * A member written in SCREAMING_CASE is a constant, and a constant reached
+ * through a known type lives in that type's definition — which is in a
+ * dependency this tool never reads.
+ */
+const CONSTANT_MEMBER = /^[A-Z][A-Z0-9_]*$/
 
 /**
  * Names that may legitimately be absent from a repository's own source.
@@ -300,9 +363,44 @@ function judgeSymbols(finding: Finding, input: GateInput): Suppression | null {
 
   const seen = new Set<string>()
   for (const m of proposed.matchAll(ATTRIBUTE_ACCESS)) {
-    const name = m[1]!
+    const receiver = m[1]
+    const name = m[2]!
     if (UNIVERSAL.has(name) || seen.has(name)) continue
     seen.add(name)
+
+    /*
+     * A constant reached through a type the repository knows is not invented.
+     *
+     * Found by running the benchmark, not by reasoning: on spring-petclinic
+     * this rule suppressed all three findings the repo exists to test, each
+     * proposing `FetchType.EAGER` -> `FetchType.LAZY`. `FetchType` is imported
+     * in three entity files; `LAZY` appears nowhere, because it is an enum
+     * constant declared in `jakarta.persistence`, a jar speeDB never reads.
+     *
+     * The rule was checking the member and ignoring the receiver, so every
+     * framework constant a rewrite legitimately reaches for — `FetchType.LAZY`,
+     * `CascadeType.MERGE`, `Propagation.REQUIRES_NEW` — read as invented. That
+     * is a false suppression of exactly the findings this tool is best at, and
+     * a gate that eats a true positive is worse than the padding it removes.
+     *
+     * `UNIVERSAL` cannot fix this: it is a fixed list, and the set of framework
+     * constants across sixty engines and a dozen ORMs is not enumerable. The
+     * receiver is the general signal — if the type is in the source and the
+     * member is a constant, its definition is out of scope and this abstains
+     * rather than guessing.
+     *
+     * Deliberately narrow. It requires SCREAMING_CASE, so `order.nonexistent`
+     * is still caught: a lowercase member on a known receiver is an attribute
+     * this tool *can* see, and its absence still means invented.
+     */
+    if (
+      receiver &&
+      CONSTANT_MEMBER.test(name) &&
+      new RegExp(String.raw`\b${escapeRe(receiver)}\b`).test(vocabulary)
+    ) {
+      continue
+    }
+
     if (!new RegExp(String.raw`\b${escapeRe(name)}\b`).test(vocabulary)) {
       return {
         reason: 'invented-symbol',
@@ -431,6 +529,43 @@ export function severityFromEvidence(
   return { severity: 'medium', because: `${counted} structural fact(s) were counted from the two versions.` }
 }
 
+/**
+ * Weakly-supported sites cannot be rated `high`.
+ *
+ * Sampled triage authors the union of what any sample flagged, which is what
+ * keeps recall up — a site only has to be caught once. The cost is that a site
+ * one sample flagged and the others called clean reaches authoring on the same
+ * footing as one every sample flagged, and the model, asked to write up a site
+ * it has been handed as a problem, generally will.
+ *
+ * The cap is deliberately soft, and applied only in the absence of counted
+ * facts. Agreement is evidence about the *site*; a counted fact is evidence
+ * about the *rewrite*, and the second is stronger. A 1-of-3 site with three
+ * structural facts counted from the two versions is a real finding that two
+ * samples happened to miss — that is the variance sampling exists to cover, and
+ * demoting it would undo the recall the union just bought. A 1-of-3 site with
+ * nothing counted has no evidence from either direction.
+ */
+export function capBySupport(
+  severity: Severity,
+  finding: Finding,
+): { severity: Severity; note?: string } {
+  const support = finding.triageSupport
+  if (!support || support.samples < 3) return { severity }
+
+  const ratio = support.flagged / support.samples
+  if (ratio >= 0.5) return { severity }
+  if ((finding.performance?.counted.length ?? 0) > 0) return { severity }
+  if (severity !== 'high' && severity !== 'medium') return { severity }
+
+  return {
+    severity: severity === 'high' ? 'medium' : 'low',
+    note:
+      `Rated down: ${support.flagged} of ${support.samples} triage samples flagged this site, ` +
+      'and no structural fact could be counted from the two versions.',
+  }
+}
+
 /** Kept for callers that only want the upper bound. */
 export function severityCeiling(finding: Finding, scope: EnclosingScope | null): Severity {
   return severityFromEvidence(finding, scope).severity
@@ -460,6 +595,12 @@ function calibrate(finding: Finding, scope: EnclosingScope | null): Finding {
     notes.push('Severity capped at low: a citation could not be confirmed against the fetched source.')
   }
 
+  // Applied last, so it caps whatever the evidence and grounding settled on
+  // rather than being overwritten by them.
+  const capped = capBySupport(severity, finding)
+  severity = capped.severity
+  if (capped.note) notes.push(capped.note)
+
   return { ...finding, severity, modelSeverity: finding.severity, summary, groundingNotes: notes }
 }
 
@@ -487,6 +628,7 @@ export const LABELS: Record<SuppressionReason, string> = {
   'unsupported-assumption': 'contradicted assumption',
   'immaterial': 'immaterial (a column narrowing on a query that runs once)',
   'invented-symbol': 'invented symbol (the proposal names something the repository does not contain)',
+  'unsupported-speculation': 'unsupported speculation (nothing counted, weak triage support, benefit is data-dependent)',
 }
 
 function collapse(s: string): string {

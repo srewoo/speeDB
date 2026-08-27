@@ -1,0 +1,15 @@
+{
+  "provider": "openai",
+  "model": "gpt-5.4-mini",
+  "temperature": 0,
+  "maxOutputTokens": 16000,
+  "tokenBudget": 2000000,
+  "analysis": "two-stage",
+  "triageSitesPerPass": null,
+  "authorSitesPerRequest": null,
+  "triageSamples": 2,
+  "maxCandidates": null,
+  "minPriority": null,
+  "maxCandidatesPerChunk": 25,
+  "stub": false
+}

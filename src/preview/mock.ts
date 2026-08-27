@@ -123,6 +123,15 @@ export const MOCK_REPORT: ScanReport = {
           'Scan type — Seq Scan becoming Index Scan is the change you are looking for.',
           'Buffers: shared read versus hit — read means it went to disk.',
         ],
+        measures: 'bytes read and transferred, not the number of rows',
+        confirms: [
+          'Buffers: shared read falls between the two plans.',
+          'The plan becomes Index Only Scan, meaning the heap is no longer touched.',
+        ],
+        refutes: [
+          'Buffer counts are identical: the row was read either way, and only the transfer narrowed.',
+          'The application reads one of the dropped columns further down the call path, so this is a bug rather than an optimisation.',
+        ],
         summary: 'Not measured. speeDB does not execute queries — run the plan below to confirm the direction of the change.',
       },
       equivalence: {

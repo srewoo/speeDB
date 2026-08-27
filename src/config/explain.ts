@@ -1,4 +1,6 @@
 import type { DbFamily } from './engines'
+import type { FindingCategory } from '@/core/types'
+import { overlayFor } from './verify/by-category'
 
 /**
  * How to actually measure a proposed change, per engine.
@@ -440,4 +442,84 @@ export function explainFor(engineId: string, family: DbFamily): ExplainRecipe {
   const base = FAMILY_DEFAULT[family]
   const over = OVERRIDES[engineId] ?? MORE[engineId]
   return over ? { ...base, ...over } : base
+}
+
+/**
+ * The recipe for a *claim*, not just for an engine.
+ *
+ * `explainFor` answers "how do I get a plan on this store?", and for five of
+ * the fifteen finding categories that is the wrong question — a plan cannot
+ * settle a claim about plan reuse, connection occupancy, transaction age or
+ * index usage. `overlayFor` supplies the instrument that can; this merges it
+ * over the engine recipe.
+ *
+ * When the overlay sets `replacesPlan`, the EXPLAIN commands are dropped rather
+ * than shown beside it. Offering both invites the reader to run the one that
+ * cannot answer the question, get a healthy-looking plan, and conclude the
+ * finding was wrong.
+ */
+export interface ClaimRecipe extends ExplainRecipe {
+  /** The single metric under test, when the category names one. */
+  measures?: string
+  /**
+   * The claim-specific command for the current code, and for the rewrite when
+   * it differs. Carried on the recipe rather than left on the overlay so that
+   * one call to `recipeFor` is the whole answer — a caller that has to consult
+   * `overlayFor` separately for the commands is two sources that will drift.
+   */
+  claimCommandOriginal?: string
+  claimCommandProposed?: string
+  /** Evidence consistent with the claim. */
+  confirms: string[]
+  /** Evidence that kills it. Empty only when no overlay applies. */
+  refutes: string[]
+  /** True when the category's instrument is not a query plan at all. */
+  replacesPlan: boolean
+  /** Set when nothing better than the family default was available. */
+  noRecipeReason?: string
+}
+
+export function recipeFor(
+  engineId: string,
+  family: DbFamily,
+  category: FindingCategory,
+): ClaimRecipe {
+  const base = explainFor(engineId, family)
+  const overlay = overlayFor(category, engineId, family)
+
+  if (!overlay) {
+    return {
+      ...base,
+      confirms: [],
+      refutes: [],
+      replacesPlan: false,
+      // Stated rather than left to look like a considered choice. A reader who
+      // knows the recipe is generic can weigh it accordingly; one who assumes
+      // it was chosen for this claim cannot.
+      noRecipeReason:
+        `No verification recipe specific to a "${category}" claim on ${engineId}. ` +
+        'The plan below is the general one for this engine, and may not test the mechanism this finding argues for.',
+    }
+  }
+
+  return {
+    ...base,
+    // The overlay's commands win where it supplies them; `replacesPlan` blanks
+    // the generic ones entirely.
+    plan: overlay.replacesPlan ? '' : base.plan,
+    measure: overlay.replacesPlan ? undefined : base.measure,
+    // Overlay stats first: they are the ones chosen for this claim.
+    stats: [...(overlay.stats ?? []), ...(base.stats ?? [])],
+    // Overlay `lookFor` leads, and the engine's general advice follows only when
+    // a plan is still part of the answer.
+    lookFor: overlay.replacesPlan
+      ? [overlay.measures, ...overlay.confirms]
+      : [overlay.measures, ...overlay.confirms, ...base.lookFor],
+    measures: overlay.measures,
+    claimCommandOriginal: overlay.commandOriginal,
+    claimCommandProposed: overlay.commandProposed,
+    confirms: overlay.confirms,
+    refutes: overlay.refutes,
+    replacesPlan: overlay.replacesPlan === true,
+  }
 }

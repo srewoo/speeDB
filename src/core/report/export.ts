@@ -305,6 +305,29 @@ function findingToMarkdown(f: Finding): string {
     if (f.performance.counted.length) {
       lines.push('Counted from the statements (not timed):', '', ...f.performance.counted.map((c) => `- ${c}`), '')
     }
+    // The prediction, exported alongside the command. A reader who has only the
+    // markdown — which is how a finding usually reaches the person who has to
+    // act on it — otherwise gets the instruction with no failure condition, and
+    // any output at all reads as agreement.
+    if (f.performance.confirms.length) {
+      lines.push(
+        `Confirms this finding${f.performance.measures ? ` (measuring ${f.performance.measures})` : ''}:`,
+        '',
+        ...f.performance.confirms.map((c) => `- ✓ ${c}`),
+        '',
+      )
+    }
+    if (f.performance.refutes.length) {
+      lines.push(
+        'Would show this finding is wrong:',
+        '',
+        ...f.performance.refutes.map((r) => `- ✗ ${r}`),
+        '',
+      )
+    }
+    if (f.performance.noRecipeReason) {
+      lines.push(`> ${f.performance.noRecipeReason}`, '')
+    }
   }
 
   if (f.indexAdvice?.notes.filter(Boolean).length) {

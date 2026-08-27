@@ -91,16 +91,47 @@
       <td>Up to 6 reports, each expiring 60 minutes after the scan. Cleared when Chrome
         closes, or immediately via Settings &rarr; Appearance &rarr; Clear cached scans.</td>
     </tr>
+    <tr>
+      <td>Runtime evidence you paste in (query plans, index catalogs, query logs)</td>
+      <td><code>chrome.storage.session</code> (memory-backed) &mdash; <strong>no disk option</strong></td>
+      <td>Up to 40 captures. Cleared when Chrome closes, or immediately via Settings.
+        Never sent anywhere, including to your AI provider.</td>
+    </tr>
   </table>
 
   <h3>About the scan cache</h3>
   <p>
     A completed scan is kept for 60 minutes so that reopening a report, or scanning the same
     commit again, costs nothing. The cache key includes the commit SHA, so a new commit is
-    never served a previous commit's results, and the AI provider and model, so switching
-    either produces a fresh analysis. Cached reports live in memory only and are never
+    never served a previous commit's results; the AI provider and model, so switching either
+    produces a fresh analysis; and the analysis settings and prompt version, so a change to
+    how speeDB analyses never reuses results produced by the previous version. Cached reports live in memory only and are never
     written to disk. <strong>Rescan without cache</strong> on the report, and
     <strong>Scan fresh</strong> on the start screen, both bypass it entirely.
+  </p>
+
+  <h3>About runtime evidence</h3>
+  <p>
+    If you paste <code>EXPLAIN ANALYZE</code> output, an index catalog or a query log into
+    speeDB to check a finding, understand what that text contains:
+    a query plan carries production values inside its <code>Filter:</code> and
+    <code>Index Cond:</code> lines; a query log carries bound parameters; a
+    <code>pg_stats</code> dump carries a sample of your rows.
+  </p>
+  <p>
+    So evidence is held to a <em>stricter</em> rule than your API keys, and the reason is
+    that a leaked key is revocable and a leaked customer record is not. It is kept in
+    memory-backed session storage, and <strong>there is no option to persist it to
+    disk</strong> &mdash; deliberately, because offering one would mean most people take it.
+    It is never transmitted: it is not sent to your AI provider, it is not included in an
+    exported report, and speeDB has no server to send it to.
+  </p>
+  <p>
+    Where only the <em>shape</em> of a statement is needed &mdash; counting how many times
+    one query shape ran, which is how an N+1 is confirmed &mdash; literals are stripped
+    before anything is stored or displayed. If you export a contradicted finding to share
+    with us, the export contains the finding and the measured numbers, never the raw capture
+    that produced them.
   </p>
 
   <h3>About key storage</h3>

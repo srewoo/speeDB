@@ -69,7 +69,20 @@ export class ChromeAiProvider implements LlmProvider {
     }
 
     try {
-      const text = await session.prompt(req.user, { signal: req.signal })
+      // No structured-output facility on this backend. `req.schema` is honoured
+      // where it can be — as a `responseConstraint` on the builds that expose
+      // one — and otherwise deliberately ignored rather than quietly dropped:
+      // `analyze/parse.ts` repairs what arrives, which is the reason that
+      // repair path exists at all. Enforcing nothing here is a real difference
+      // between the on-device path and the cloud ones, and it belongs in the
+      // code rather than in a reader's assumption.
+      const constrained = req.schema && 'responseConstraint' in session
+      const text = await session.prompt(
+        req.user,
+        constrained
+          ? { signal: req.signal, responseConstraint: req.schema!.schema }
+          : { signal: req.signal },
+      )
       return { text, promptTokens, completionTokens: estimateTokens(text) }
     } catch (e) {
       if (req.signal?.aborted) throw new LlmError('Scan cancelled.', 'cancelled')
@@ -86,7 +99,15 @@ export class ChromeAiProvider implements LlmProvider {
 
 /* The Prompt API is not in @types/chrome yet — narrow local declarations. */
 interface LanguageModelSession {
-  prompt(input: string, opts?: { signal?: AbortSignal }): Promise<string>
+  /**
+   * `responseConstraint` is present on the builds that shipped it and absent on
+   * the rest, which is why the call site feature-detects rather than trusting
+   * this declaration.
+   */
+  prompt(
+    input: string,
+    opts?: { signal?: AbortSignal; responseConstraint?: Record<string, unknown> },
+  ): Promise<string>
   destroy?(): void
 }
 interface LanguageModelApi {

@@ -1,12 +1,25 @@
 import type { ModelSpec, ProviderId } from '@/config/models'
+import type { ResponseSchema } from '@/core/analyze/schemas'
 
 export interface LlmRequest {
   system: string
   user: string
   temperature: number
   maxOutputTokens: number
-  /** Adapters that support structured output enforce this schema. */
-  jsonSchema?: Record<string, unknown>
+  /**
+   * Response schema, enforced by every adapter that can.
+   *
+   * Adapters differ in how, not whether: OpenAI takes a named `json_schema`
+   * response format, Gemini a `responseSchema`, Anthropic a forced tool call
+   * whose `input_schema` is the same document. Chrome's built-in AI has no
+   * facility for it and says so rather than pretending.
+   *
+   * `analyze/parse.ts` still repairs what arrives. A schema removes most of
+   * what it has to repair; it does not remove the need for it, because one
+   * backend cannot enforce anything and a truncated response is malformed
+   * whatever the provider promised.
+   */
+  schema?: ResponseSchema
   signal?: AbortSignal
 }
 

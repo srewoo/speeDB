@@ -1,0 +1,734 @@
+{
+  "id": "88e37c15-mtb08242",
+  "repo": {
+    "forge": "github",
+    "apiOrigin": "https://api.github.com",
+    "owner": "spring-projects",
+    "name": "spring-petclinic",
+    "ref": "88e37c15cf6fc8490b01bc3e8e2c800cec1ac272",
+    "commitSha": "88e37c15cf6fc8490b01bc3e8e2c800cec1ac272"
+  },
+  "createdAt": "2026-08-27T04:10:01.778Z",
+  "provider": "openai",
+  "model": "gpt-5.4-mini",
+  "findings": [],
+  "rejected": [],
+  "suppressed": [
+    {
+      "id": "f1-mtb07sef",
+      "kind": "behavioural",
+      "title": "Load pets lazily instead of eagerly",
+      "summary": "The `Owner` entity loads its `pets` collection eagerly, which forces pet rows to be fetched whenever an owner is materialized even if the caller only needs owner fields.",
+      "severity": "medium",
+      "category": "over-fetch",
+      "engine": "Unidentified",
+      "accessStyle": "orm",
+      "original": "@OneToMany(cascade = CascadeType.ALL, fetch = FetchType.EAGER)\n\t@JoinColumn(name = \"owner_id\")\n\t@OrderBy(\"name\")\n\tprivate final List<Pet> pets = new ArrayList<>();",
+      "primaryOccurrence": {
+        "file": "src/main/java/org/springframework/samples/petclinic/owner/Owner.java",
+        "startLine": 64,
+        "endLine": 67,
+        "enclosingSymbol": "Owner",
+        "triggeredBy": "unknown",
+        "excerpt": "\t@OneToMany(cascade = CascadeType.ALL, fetch = FetchType.EAGER)\n\t@JoinColumn(name = \"owner_id\")\n\t@OrderBy(\"name\")\n\tprivate final List<Pet> pets = new ArrayList<>();"
+      },
+      "otherOccurrences": [],
+      "suggestion": {
+        "proposed": "@OneToMany(cascade = CascadeType.ALL, fetch = FetchType.LAZY)\n\t@JoinColumn(name = \"owner_id\")\n\t@OrderBy(\"name\")\n\tprivate final List<Pet> pets = new ArrayList<>();",
+        "rationale": "This defers loading the pet collection until code actually accesses it, so owner-only reads do not also pull the child rows.",
+        "equivalenceArgument": "This is behavioural, not equivalent: the object graph visible to callers changes from always-initialized pets to on-demand initialization, and lazy access can now raise a loading error outside an active persistence context; the returned rows and columns from the database are not directly changed, but the observable ORM behavior is.",
+        "assumptions": [
+          "Callers that need pets will access them within an active persistence context or via an explicit fetch strategy.",
+          "No code depends on pets being initialized immediately after loading an Owner."
+        ],
+        "expectedImpact": "Avoids fetching the child collection on owner-only loads; pet rows are read only when needed."
+      },
+      "evidence": [],
+      "grounding": "verified",
+      "groundingNotes": [],
+      "modelConfidence": 0.5,
+      "triageSupport": {
+        "flagged": 2,
+        "samples": 3
+      },
+      "scope": {
+        "loopDepth": 0,
+        "loopHeaders": [],
+        "symbol": "Owner",
+        "symbolLine": 49,
+        "opensLoop": false,
+        "trigger": "unknown"
+      },
+      "equivalence": {
+        "status": "unverifiable",
+        "verified": [],
+        "deltas": [],
+        "undecided": [
+          "Not a statement this checker can read (non-SQL engine or unsupported syntax)."
+        ],
+        "summary": "Not machine-checkable: Not a statement this checker can read (non-SQL engine or unsupported syntax)."
+      },
+      "performance": {
+        "status": "unmeasured",
+        "counted": [],
+        "unmeasured": [
+          "Whether this is actually faster. speeDB does not execute anything — it has no connection, no timings and no query plan."
+        ],
+        "verification": [
+          {
+            "label": "Measure on Unidentified",
+            "command": "EXPLAIN ANALYZE\n-- current:  @OneToMany(cascade = CascadeType.ALL, fetch = FetchType.EAGER) @JoinColumn(name = \"owner_id\") @OrderBy(\"name\") private f\n-- proposed: @OneToMany(cascade = CascadeType.ALL, fetch = FetchType.LAZY) @JoinColumn(name = \"owner_id\") @OrderBy(\"name\") private fi"
+          }
+        ],
+        "lookFor": [
+          "The engine could not be identified with confidence — confirm the dialect before running this."
+        ],
+        "confirms": [],
+        "refutes": [],
+        "noRecipeReason": "No verification recipe specific to a \"over-fetch\" claim on unknown. The plan below is the general one for this engine, and may not test the mechanism this finding argues for.",
+        "summary": "Not measured. speeDB does not execute queries — run the plan below to confirm the direction of the change."
+      },
+      "suppression": {
+        "reason": "not-data-access",
+        "detail": "Neither the original nor the proposal parses as a query or as ORM data access — this is not database code, so a database finding does not apply to it."
+      }
+    },
+    {
+      "id": "f2-mtb07xlt",
+      "kind": "behavioural",
+      "title": "Load visits lazily and fetch them where needed",
+      "summary": "The eager `visits` collection on `Pet` forces every pet load to pull visit rows even when callers do not use them.",
+      "severity": "medium",
+      "category": "over-fetch",
+      "engine": "Unidentified",
+      "accessStyle": "orm",
+      "original": "@OneToMany(cascade = CascadeType.ALL, fetch = FetchType.EAGER)\n\t@JoinColumn(name = \"pet_id\")\n\t@OrderBy(\"date ASC\")\n\tprivate final Set<Visit> visits = new LinkedHashSet<>();",
+      "primaryOccurrence": {
+        "file": "src/main/java/org/springframework/samples/petclinic/owner/Pet.java",
+        "startLine": 56,
+        "endLine": 59,
+        "enclosingSymbol": "Pet",
+        "triggeredBy": "unknown",
+        "excerpt": "\t@OneToMany(cascade = CascadeType.ALL, fetch = FetchType.EAGER)\n\t@JoinColumn(name = \"pet_id\")\n\t@OrderBy(\"date ASC\")\n\tprivate final Set<Visit> visits = new LinkedHashSet<>();"
+      },
+      "otherOccurrences": [],
+      "suggestion": {
+        "proposed": "@OneToMany(cascade = CascadeType.ALL, fetch = FetchType.LAZY)\n\t@JoinColumn(name = \"pet_id\")\n\t@OrderBy(\"date ASC\")\n\tprivate final Set<Visit> visits = new LinkedHashSet<>();",
+        "rationale": "Deferring the collection avoids loading visit rows for pet reads that never touch the association, and the visits can still be fetched explicitly when the UI needs them.",
+        "equivalenceArgument": "This changes when related rows are loaded, so it is behavioural rather than equivalent; the pet row set and columns stay the same, but access to `visits` now happens on demand instead of always being materialized with the pet.",
+        "assumptions": [
+          "Callers that need visits either already access them within an open persistence context or are updated to fetch them explicitly.",
+          "The application does not rely on eager initialization side effects during pet loading."
+        ],
+        "expectedImpact": "Fewer visit rows are read for pet loads that do not use the association; visit loading moves to the code paths that actually need it."
+      },
+      "evidence": [],
+      "grounding": "verified",
+      "groundingNotes": [],
+      "modelConfidence": 0.5,
+      "triageSupport": {
+        "flagged": 2,
+        "samples": 3
+      },
+      "scope": {
+        "loopDepth": 0,
+        "loopHeaders": [],
+        "symbol": "Pet",
+        "symbolLine": 46,
+        "opensLoop": false,
+        "trigger": "unknown"
+      },
+      "equivalence": {
+        "status": "unverifiable",
+        "verified": [],
+        "deltas": [],
+        "undecided": [
+          "Not a statement this checker can read (non-SQL engine or unsupported syntax)."
+        ],
+        "summary": "Not machine-checkable: Not a statement this checker can read (non-SQL engine or unsupported syntax)."
+      },
+      "performance": {
+        "status": "unmeasured",
+        "counted": [],
+        "unmeasured": [
+          "Whether this is actually faster. speeDB does not execute anything — it has no connection, no timings and no query plan."
+        ],
+        "verification": [
+          {
+            "label": "Measure on Unidentified",
+            "command": "EXPLAIN ANALYZE\n-- current:  @OneToMany(cascade = CascadeType.ALL, fetch = FetchType.EAGER) @JoinColumn(name = \"pet_id\") @OrderBy(\"date ASC\") private\n-- proposed: @OneToMany(cascade = CascadeType.ALL, fetch = FetchType.LAZY) @JoinColumn(name = \"pet_id\") @OrderBy(\"date ASC\") private "
+          }
+        ],
+        "lookFor": [
+          "The engine could not be identified with confidence — confirm the dialect before running this."
+        ],
+        "confirms": [],
+        "refutes": [],
+        "noRecipeReason": "No verification recipe specific to a \"over-fetch\" claim on unknown. The plan below is the general one for this engine, and may not test the mechanism this finding argues for.",
+        "summary": "Not measured. speeDB does not execute queries — run the plan below to confirm the direction of the change."
+      },
+      "suppression": {
+        "reason": "not-data-access",
+        "detail": "Neither the original nor the proposal parses as a query or as ORM data access — this is not database code, so a database finding does not apply to it."
+      }
+    },
+    {
+      "id": "f3-mtb0823q",
+      "kind": "behavioural",
+      "title": "Defer loading the specialties collection",
+      "summary": "The eager many-to-many mapping forces specialty rows to be loaded whenever a Vet is fetched, even when the caller only needs the vet itself.",
+      "severity": "medium",
+      "category": "over-fetch",
+      "engine": "Unidentified",
+      "accessStyle": "orm",
+      "original": "\t@ManyToMany(fetch = FetchType.EAGER)",
+      "primaryOccurrence": {
+        "file": "src/main/java/org/springframework/samples/petclinic/vet/Vet.java",
+        "startLine": 47,
+        "endLine": 47,
+        "enclosingSymbol": "Vet",
+        "triggeredBy": "unknown",
+        "excerpt": "\t@ManyToMany(fetch = FetchType.EAGER)"
+      },
+      "otherOccurrences": [],
+      "suggestion": {
+        "proposed": "\t@ManyToMany(fetch = FetchType.LAZY)",
+        "rationale": "Lazy loading keeps the association from being materialized on every Vet load, so the database only reads the join rows and specialty rows when code actually traverses the collection.",
+        "equivalenceArgument": "This is not equivalent because it changes when the specialties collection is loaded and can change the number and timing of SQL statements, including error behavior for detached entities; the returned Vet rows and columns are the same, but access to specialties is no longer immediate.",
+        "assumptions": [
+          "Callers that need specialties still access the collection inside an active persistence context or explicitly fetch them with a query/entity graph.",
+          "The application does not rely on eager loading side effects for serialization or view rendering."
+        ],
+        "expectedImpact": "Avoids loading the association for Vet reads that never touch specialties; when specialties are needed, loading is deferred to the access site instead of happening for every Vet query."
+      },
+      "evidence": [
+        {
+          "kind": "call-site",
+          "file": "src/main/java/org/springframework/samples/petclinic/vet/Vet.java",
+          "startLine": 47,
+          "endLine": 49,
+          "quote": "\t@ManyToMany(fetch = FetchType.EAGER)\n\t@JoinTable(name = \"vet_specialties\", joinColumns = @JoinColumn(name = \"vet_id\"),\n\t\t\tinverseJoinColumns = @JoinColumn(name = \"specialty_id\"))",
+          "relevance": "The mapping eagerly loads a many-to-many association through the join table."
+        },
+        {
+          "kind": "schema",
+          "file": "src/main/resources/db/h2/schema.sql",
+          "startLine": 23,
+          "endLine": 28,
+          "quote": "CREATE TABLE vet_specialties (\n  vet_id       INTEGER NOT NULL,\n  specialty_id INTEGER NOT NULL\n);\nALTER TABLE vet_specialties ADD CONSTRAINT fk_vet_specialties_vets FOREIGN KEY (vet_id) REFERENCES vets (id);\nALTER TABLE vet_specialties ADD CONSTRAINT fk_vet_specialties_specialties FOREIGN KEY (specialty_id) REFERENCES specialties (id);",
+          "relevance": "The association is backed by a separate join table, so eager loading necessarily touches additional rows."
+        }
+      ],
+      "grounding": "verified",
+      "groundingNotes": [],
+      "modelConfidence": 0.92,
+      "triageSupport": {
+        "flagged": 2,
+        "samples": 3
+      },
+      "scope": {
+        "loopDepth": 0,
+        "loopHeaders": [],
+        "symbol": "Vet",
+        "symbolLine": 45,
+        "opensLoop": false,
+        "trigger": "unknown"
+      },
+      "equivalence": {
+        "status": "unverifiable",
+        "verified": [],
+        "deltas": [],
+        "undecided": [
+          "Not a statement this checker can read (non-SQL engine or unsupported syntax)."
+        ],
+        "summary": "Not machine-checkable: Not a statement this checker can read (non-SQL engine or unsupported syntax)."
+      },
+      "performance": {
+        "status": "unmeasured",
+        "counted": [],
+        "unmeasured": [
+          "Whether this is actually faster. speeDB does not execute anything — it has no connection, no timings and no query plan."
+        ],
+        "verification": [
+          {
+            "label": "Measure on Unidentified",
+            "command": "EXPLAIN ANALYZE\n-- current:  @ManyToMany(fetch = FetchType.EAGER)\n-- proposed: @ManyToMany(fetch = FetchType.LAZY)"
+          }
+        ],
+        "lookFor": [
+          "The engine could not be identified with confidence — confirm the dialect before running this."
+        ],
+        "confirms": [],
+        "refutes": [],
+        "noRecipeReason": "No verification recipe specific to a \"over-fetch\" claim on unknown. The plan below is the general one for this engine, and may not test the mechanism this finding argues for.",
+        "summary": "Not measured. speeDB does not execute queries — run the plan below to confirm the direction of the change."
+      },
+      "suppression": {
+        "reason": "not-data-access",
+        "detail": "Neither the original nor the proposal parses as a query or as ORM data access — this is not database code, so a database finding does not apply to it."
+      }
+    }
+  ],
+  "engineProfile": {
+    "declared": [
+      {
+        "engine": "postgres",
+        "source": "src/main/resources/application-postgres.properties",
+        "quote": "spring.datasource.url=${POSTGRES_URL:jdbc:postgresql://localhost/petclinic}",
+        "authority": 100
+      },
+      {
+        "engine": "mysql",
+        "source": "src/main/resources/application-mysql.properties",
+        "quote": "spring.datasource.url=${MYSQL_URL:jdbc:mysql://localhost/petclinic}",
+        "authority": 100
+      }
+    ],
+    "primary": "postgres",
+    "ambiguous": true
+  },
+  "triageLog": {
+    "flagged": [
+      {
+        "id": "src/main/java/org/springframework/samples/petclinic/owner/Owner.java:64:0",
+        "category": "over-fetch",
+        "why": "eager pets collection on owner load"
+      },
+      {
+        "id": "src/main/java/org/springframework/samples/petclinic/owner/Pet.java:56:0",
+        "category": "over-fetch",
+        "why": "eager visits collection on pet load"
+      },
+      {
+        "id": "src/main/java/org/springframework/samples/petclinic/vet/Vet.java:47:0",
+        "category": "over-fetch",
+        "why": "eager many-to-many graph load"
+      }
+    ],
+    "unsure": [],
+    "clean": [
+      "src/main/java/org/springframework/samples/petclinic/owner/PetTypeRepository.java:36:0",
+      "relevance:src/main/java/org/springframework/samples/petclinic/model/NamedEntity.java",
+      "relevance:src/main/java/org/springframework/samples/petclinic/model/Person.java",
+      "relevance:src/main/java/org/springframework/samples/petclinic/owner/PetType.java",
+      "relevance:src/main/java/org/springframework/samples/petclinic/owner/Visit.java",
+      "relevance:src/main/java/org/springframework/samples/petclinic/vet/Specialty.java",
+      "src/main/resources/db/h2/data.sql:1:0",
+      "src/main/resources/db/h2/schema.sql:15:1",
+      "src/main/resources/db/h2/schema.sql:44:2",
+      "src/main/resources/db/h2/schema.sql:53:3",
+      "src/main/resources/db/h2/schema.sql:64:4",
+      "src/main/resources/db/postgres/data.sql:1:0",
+      "src/main/resources/db/postgres/schema.sql:6:1",
+      "src/main/resources/db/postgres/schema.sql:20:2",
+      "src/main/resources/db/postgres/schema.sql:34:3",
+      "src/main/resources/db/postgres/schema.sql:43:4",
+      "src/main/resources/db/h2/schema.sql:10:0",
+      "src/main/resources/db/mysql/schema.sql:1:0",
+      "src/main/resources/db/mysql/schema.sql:8:1",
+      "src/main/resources/db/mysql/schema.sql:14:2",
+      "src/main/resources/db/mysql/schema.sql:22:3",
+      "src/main/resources/db/mysql/schema.sql:28:4",
+      "src/main/resources/db/mysql/schema.sql:38:5",
+      "src/main/resources/db/mysql/schema.sql:50:6",
+      "src/main/resources/db/postgres/schema.sql:1:0",
+      "src/main/resources/db/postgres/schema.sql:53:5"
+    ],
+    "unaccounted": []
+  },
+  "schema": {
+    "tables": 7,
+    "indexes": 14,
+    "sources": [
+      "src/main/resources/db/h2/schema.sql",
+      "src/main/resources/db/postgres/schema.sql"
+    ],
+    "unknowable": [
+      "Row counts — no table size is recoverable from source.",
+      "Column selectivity and data distribution.",
+      "Which indexes actually exist in production, versus which were declared in a migration that may have been superseded, reverted, or never run.",
+      "Index bloat, and whether an existing index is used at all."
+    ]
+  },
+  "stats": {
+    "filesInTree": 117,
+    "filesFetched": 117,
+    "filesSkipped": 0,
+    "ingest": "archive",
+    "apiCalls": 3,
+    "candidatesFound": 29,
+    "sitesMatched": 29,
+    "sitesSampled": 5,
+    "sitesQueued": 29,
+    "sitesAnalysed": 29,
+    "sitesFiltered": {
+      "belowConfidence": 0,
+      "lowPriority": 0
+    },
+    "truncatedFiles": [],
+    "sitesUnaccounted": 0,
+    "triage": {
+      "flagged": 3,
+      "clean": 26,
+      "unsure": 0
+    },
+    "chunksAnalysed": 4,
+    "promptTokens": 56154,
+    "completionTokens": 5024,
+    "chunksReused": 0,
+    "elapsedMs": 40035
+  },
+  "scope": {
+    "kind": "repository"
+  },
+  "candidates": [
+    {
+      "file": "src/main/java/org/springframework/samples/petclinic/owner/PetTypeRepository.java",
+      "startLine": 36,
+      "endLine": 36,
+      "engine": "unknown",
+      "accessStyle": "orm",
+      "detector": "hibernate-jpa+sql-in-string-literal",
+      "confidence": 0.8500000000000001,
+      "priority": 0.4,
+      "loopDepth": 0,
+      "trigger": "unknown"
+    },
+    {
+      "file": "src/main/java/org/springframework/samples/petclinic/owner/Owner.java",
+      "startLine": 64,
+      "endLine": 64,
+      "engine": "unknown",
+      "accessStyle": "orm",
+      "detector": "hibernate-jpa",
+      "confidence": 0.8,
+      "priority": 0.4,
+      "loopDepth": 0,
+      "trigger": "unknown"
+    },
+    {
+      "file": "src/main/java/org/springframework/samples/petclinic/owner/Pet.java",
+      "startLine": 56,
+      "endLine": 56,
+      "engine": "unknown",
+      "accessStyle": "orm",
+      "detector": "hibernate-jpa",
+      "confidence": 0.8,
+      "priority": 0.4,
+      "loopDepth": 0,
+      "trigger": "unknown"
+    },
+    {
+      "file": "src/main/java/org/springframework/samples/petclinic/vet/Vet.java",
+      "startLine": 47,
+      "endLine": 47,
+      "engine": "unknown",
+      "accessStyle": "orm",
+      "detector": "hibernate-jpa",
+      "confidence": 0.8,
+      "priority": 0.4,
+      "loopDepth": 0,
+      "trigger": "unknown"
+    },
+    {
+      "file": "src/main/java/org/springframework/samples/petclinic/model/NamedEntity.java",
+      "startLine": 31,
+      "endLine": 37,
+      "engine": "unknown",
+      "accessStyle": "orm",
+      "detector": "relevance(1)",
+      "confidence": 0.7,
+      "priority": 0.38,
+      "loopDepth": 0,
+      "trigger": "unknown"
+    },
+    {
+      "file": "src/main/java/org/springframework/samples/petclinic/model/Person.java",
+      "startLine": 29,
+      "endLine": 40,
+      "engine": "unknown",
+      "accessStyle": "orm",
+      "detector": "relevance(2)",
+      "confidence": 0.7,
+      "priority": 0.38,
+      "loopDepth": 0,
+      "trigger": "unknown"
+    },
+    {
+      "file": "src/main/java/org/springframework/samples/petclinic/owner/PetType.java",
+      "startLine": 24,
+      "endLine": 31,
+      "engine": "unknown",
+      "accessStyle": "orm",
+      "detector": "relevance(1)",
+      "confidence": 0.7,
+      "priority": 0.38,
+      "loopDepth": 0,
+      "trigger": "unknown"
+    },
+    {
+      "file": "src/main/java/org/springframework/samples/petclinic/owner/Visit.java",
+      "startLine": 32,
+      "endLine": 42,
+      "engine": "unknown",
+      "accessStyle": "orm",
+      "detector": "relevance(2)",
+      "confidence": 0.7,
+      "priority": 0.38,
+      "loopDepth": 0,
+      "trigger": "unknown"
+    },
+    {
+      "file": "src/main/java/org/springframework/samples/petclinic/vet/Specialty.java",
+      "startLine": 26,
+      "endLine": 33,
+      "engine": "unknown",
+      "accessStyle": "orm",
+      "detector": "relevance(1)",
+      "confidence": 0.7,
+      "priority": 0.38,
+      "loopDepth": 0,
+      "trigger": "unknown"
+    },
+    {
+      "file": "src/main/resources/db/h2/data.sql",
+      "startLine": 1,
+      "endLine": 53,
+      "engine": "unknown",
+      "accessStyle": "ddl-migration",
+      "detector": "sql-file",
+      "confidence": 0.99,
+      "priority": 0,
+      "loopDepth": 0,
+      "trigger": "migration"
+    },
+    {
+      "file": "src/main/resources/db/h2/schema.sql",
+      "startLine": 15,
+      "endLine": 36,
+      "engine": "unknown",
+      "accessStyle": "ddl-migration",
+      "detector": "sql-file",
+      "confidence": 0.99,
+      "priority": 0,
+      "loopDepth": 0,
+      "trigger": "migration"
+    },
+    {
+      "file": "src/main/resources/db/h2/schema.sql",
+      "startLine": 44,
+      "endLine": 46,
+      "engine": "unknown",
+      "accessStyle": "ddl-migration",
+      "detector": "sql-file",
+      "confidence": 0.99,
+      "priority": 0,
+      "loopDepth": 0,
+      "trigger": "migration"
+    },
+    {
+      "file": "src/main/resources/db/h2/schema.sql",
+      "startLine": 53,
+      "endLine": 58,
+      "engine": "unknown",
+      "accessStyle": "ddl-migration",
+      "detector": "sql-file",
+      "confidence": 0.99,
+      "priority": 0,
+      "loopDepth": 0,
+      "trigger": "migration"
+    },
+    {
+      "file": "src/main/resources/db/h2/schema.sql",
+      "startLine": 64,
+      "endLine": 65,
+      "engine": "unknown",
+      "accessStyle": "ddl-migration",
+      "detector": "sql-file",
+      "confidence": 0.99,
+      "priority": 0,
+      "loopDepth": 0,
+      "trigger": "migration"
+    },
+    {
+      "file": "src/main/resources/db/postgres/data.sql",
+      "startLine": 1,
+      "endLine": 53,
+      "engine": "postgres",
+      "accessStyle": "ddl-migration",
+      "detector": "sql-file+sql-fragment-concat+postgres-dialect",
+      "confidence": 0.99,
+      "priority": 0,
+      "loopDepth": 0,
+      "trigger": "migration"
+    },
+    {
+      "file": "src/main/resources/db/postgres/schema.sql",
+      "startLine": 6,
+      "endLine": 14,
+      "engine": "postgres",
+      "accessStyle": "ddl-migration",
+      "detector": "sql-file",
+      "confidence": 0.99,
+      "priority": 0,
+      "loopDepth": 0,
+      "trigger": "migration"
+    },
+    {
+      "file": "src/main/resources/db/postgres/schema.sql",
+      "startLine": 20,
+      "endLine": 26,
+      "engine": "postgres",
+      "accessStyle": "ddl-migration",
+      "detector": "sql-file",
+      "confidence": 0.99,
+      "priority": 0,
+      "loopDepth": 0,
+      "trigger": "migration"
+    },
+    {
+      "file": "src/main/resources/db/postgres/schema.sql",
+      "startLine": 34,
+      "endLine": 36,
+      "engine": "postgres",
+      "accessStyle": "ddl-migration",
+      "detector": "sql-file",
+      "confidence": 0.99,
+      "priority": 0,
+      "loopDepth": 0,
+      "trigger": "migration"
+    },
+    {
+      "file": "src/main/resources/db/postgres/schema.sql",
+      "startLine": 43,
+      "endLine": 47,
+      "engine": "postgres",
+      "accessStyle": "ddl-migration",
+      "detector": "sql-file",
+      "confidence": 0.99,
+      "priority": 0,
+      "loopDepth": 0,
+      "trigger": "migration"
+    },
+    {
+      "file": "src/main/resources/db/h2/schema.sql",
+      "startLine": 10,
+      "endLine": 10,
+      "engine": "unknown",
+      "accessStyle": "ddl-migration",
+      "detector": "sql-file",
+      "confidence": 0.95,
+      "priority": 0,
+      "loopDepth": 0,
+      "trigger": "migration"
+    },
+    {
+      "file": "src/main/resources/db/mysql/schema.sql",
+      "startLine": 1,
+      "endLine": 1,
+      "engine": "mysql",
+      "accessStyle": "ddl-migration",
+      "detector": "sql-file",
+      "confidence": 0.95,
+      "priority": 0,
+      "loopDepth": 0,
+      "trigger": "migration"
+    },
+    {
+      "file": "src/main/resources/db/mysql/schema.sql",
+      "startLine": 8,
+      "endLine": 8,
+      "engine": "mysql",
+      "accessStyle": "ddl-migration",
+      "detector": "sql-file",
+      "confidence": 0.95,
+      "priority": 0,
+      "loopDepth": 0,
+      "trigger": "migration"
+    },
+    {
+      "file": "src/main/resources/db/mysql/schema.sql",
+      "startLine": 14,
+      "endLine": 14,
+      "engine": "mysql",
+      "accessStyle": "ddl-migration",
+      "detector": "sql-file",
+      "confidence": 0.95,
+      "priority": 0,
+      "loopDepth": 0,
+      "trigger": "migration"
+    },
+    {
+      "file": "src/main/resources/db/mysql/schema.sql",
+      "startLine": 22,
+      "endLine": 22,
+      "engine": "mysql",
+      "accessStyle": "ddl-migration",
+      "detector": "sql-file",
+      "confidence": 0.95,
+      "priority": 0,
+      "loopDepth": 0,
+      "trigger": "migration"
+    },
+    {
+      "file": "src/main/resources/db/mysql/schema.sql",
+      "startLine": 28,
+      "endLine": 28,
+      "engine": "mysql",
+      "accessStyle": "ddl-migration",
+      "detector": "sql-file",
+      "confidence": 0.95,
+      "priority": 0,
+      "loopDepth": 0,
+      "trigger": "migration"
+    },
+    {
+      "file": "src/main/resources/db/mysql/schema.sql",
+      "startLine": 38,
+      "endLine": 38,
+      "engine": "mysql",
+      "accessStyle": "ddl-migration",
+      "detector": "sql-file",
+      "confidence": 0.95,
+      "priority": 0,
+      "loopDepth": 0,
+      "trigger": "migration"
+    },
+    {
+      "file": "src/main/resources/db/mysql/schema.sql",
+      "startLine": 50,
+      "endLine": 50,
+      "engine": "mysql",
+      "accessStyle": "ddl-migration",
+      "detector": "sql-file",
+      "confidence": 0.95,
+      "priority": 0,
+      "loopDepth": 0,
+      "trigger": "migration"
+    },
+    {
+      "file": "src/main/resources/db/postgres/schema.sql",
+      "startLine": 1,
+      "endLine": 1,
+      "engine": "postgres",
+      "accessStyle": "ddl-migration",
+      "detector": "sql-file",
+      "confidence": 0.95,
+      "priority": 0,
+      "loopDepth": 0,
+      "trigger": "migration"
+    },
+    {
+      "file": "src/main/resources/db/postgres/schema.sql",
+      "startLine": 53,
+      "endLine": 53,
+      "engine": "postgres",
+      "accessStyle": "ddl-migration",
+      "detector": "sql-file",
+      "confidence": 0.95,
+      "priority": 0,
+      "loopDepth": 0,
+      "trigger": "migration"
+    }
+  ]
+}

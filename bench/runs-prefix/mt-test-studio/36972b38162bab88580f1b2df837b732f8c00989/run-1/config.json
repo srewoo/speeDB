@@ -1,0 +1,2 @@
+{ "provider": "openai", "model": "gpt-5.4-mini", "temperature": 0, "maxOutputTokens": 16000,
+  "maxCandidates": null, "minPriority": 0.7, "maxCandidatesPerChunk": 25, "stub": false }

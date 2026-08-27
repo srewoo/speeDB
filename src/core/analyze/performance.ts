@@ -1,8 +1,9 @@
 import { engineSpec } from '@/config/engines'
-import { explainFor } from '@/config/explain'
+import { recipeFor } from '@/config/explain'
 import { readSqlShape } from './sql-shape'
 import { ormVerificationRecipe, readOrmShape, type OrmShape } from './orm-shape'
 import type { EnclosingScope } from '@/core/detect/scope'
+import type { FindingCategory } from '@/core/types'
 
 /**
  * The speed claim, held to the same standard as the equivalence claim.
@@ -42,6 +43,30 @@ export interface PerformanceCheck {
   verification: VerificationStep[]
   /** Which line of the output actually answers the question. */
   lookFor: string[]
+  /**
+   * The single metric this finding's claim rests on, when the category names
+   * one. A recipe that cannot state what it measures does not know.
+   */
+  measures?: string
+  /** Output consistent with the claim. */
+  confirms: string[]
+  /**
+   * Output that would kill the claim.
+   *
+   * This is what turns a recipe from an instruction into a prediction. A
+   * command with no stated failure condition can be run, produce any output at
+   * all, and be read as agreement — which is how a verification step becomes a
+   * ritual. Naming the refutation up front is what makes "this finding was
+   * wrong" a reachable outcome rather than an absence of one.
+   */
+  refutes: string[]
+  /**
+   * Set when no recipe specific to this claim and engine exists, so the reader
+   * knows the commands below are the engine's general ones rather than chosen
+   * for this argument. Stated, because an unmarked generic recipe reads as a
+   * considered one.
+   */
+  noRecipeReason?: string
   summary: string
 }
 
@@ -60,7 +85,12 @@ export function checkPerformance(input: {
   scope?: EnclosingScope | null
 }): PerformanceCheck {
   const spec = engineSpec(input.engine)
-  const recipe = explainFor(spec.id, spec.family)
+  // Keyed on the claim as well as the engine. `explainFor` answers "how do I
+  // get a plan on this store?", which for plan-cache, connection-handling,
+  // transaction-scope, redundant-index and round-trip claims is the wrong
+  // question — a healthy-looking plan would read as agreement with a finding it
+  // cannot speak to.
+  const recipe = recipeFor(spec.id, spec.family, input.category as FindingCategory)
 
   const counted: string[] = []
   const unmeasured: string[] = []
@@ -172,6 +202,44 @@ export function checkPerformance(input: {
       )
     }
 
+    /*
+     * A mapping-level fetch mode change, counted honestly in both directions.
+     *
+     * `FetchType.EAGER` -> `LAZY` on a collection is a real structural change:
+     * the collection stops being loaded with every read of the parent, anywhere
+     * in the application. That is countable from the two versions.
+     *
+     * It is also the one rewrite in this file whose *round-trip* effect can go
+     * the wrong way, and saying so is the whole point. If any caller iterates
+     * parents and touches the collection, lazy turns one eager load into one
+     * query per parent — the N+1 this tool exists to find, introduced by its
+     * own suggestion. Source code cannot settle which case applies, because the
+     * callers are everywhere the entity is read. So it is counted as a fact and
+     * the risk is named as unmeasured, rather than presented as a win.
+     */
+    if (oa.fetchMode === 'eager' && ob.fetchMode === 'lazy') {
+      counted.push(
+        'Declares the association lazy, so the collection is no longer loaded with the parent ' +
+        'on every read of that entity. (Counted from the mapping, not measured.)',
+      )
+      unmeasured.push(
+        'Whether any caller iterates these parents and then touches the collection. If one does, ' +
+        'lazy loading converts a single eager load into one query per parent — an N+1 introduced by ' +
+        'this change. A fetch mode is a property of the mapping, so the callers are every place the ' +
+        'entity is read, and source code cannot settle it.',
+      )
+    }
+    if (oa.fetchMode === 'lazy' && ob.fetchMode === 'eager') {
+      counted.push(
+        'Declares the association eager, so the collection arrives with the parent instead of ' +
+        'in a later query. (Counted from the mapping, not measured.)',
+      )
+      unmeasured.push(
+        'Whether every read of this entity needs the collection. Eager fetching pays for it on ' +
+        'reads that never touch it, including those in unrelated code paths.',
+      )
+    }
+
     if (oa.eagerLoads.length === 0 && ob.eagerLoads.length > 0) {
       counted.push(
         `Adds eager loading (${ob.eagerLoads.join(', ')}), so related rows arrive with the parent query rather than one query each. (Counted, not measured.)`,
@@ -217,8 +285,26 @@ export function checkPerformance(input: {
 
   const verification: VerificationStep[] = []
   const isSql = isStatement(a)
+  // The claim-specific instrument goes first, and when `replacesPlan` is set it
+  // goes *instead*. Showing a plan beside a `pg_stat_activity` query invites the
+  // reader to run the plan, see nothing wrong, and conclude the finding was
+  // wrong — a plan cannot speak to connection occupancy either way.
+  if (recipe.claimCommandOriginal) {
+    verification.push({
+      label: `Measure the current behaviour — ${recipe.measures}`,
+      command: recipe.claimCommandOriginal,
+    })
+    if (recipe.claimCommandProposed) {
+      verification.push({
+        label: 'Measure the proposed behaviour',
+        command: recipe.claimCommandProposed,
+      })
+    }
+  }
 
-  if (recipe.measure && isSql) {
+  if (recipe.replacesPlan && verification.length > 0) {
+    // Instrument supplied and the plan is not the answer. Nothing further.
+  } else if (recipe.measure && isSql) {
     verification.push(
       { label: 'Measure the current query', command: `${recipe.measure}\n${input.original.trim()};` },
       { label: 'Measure the proposed query', command: `${recipe.measure}\n${input.proposed.trim()};` },
@@ -265,6 +351,10 @@ export function checkPerformance(input: {
     unmeasured,
     verification,
     lookFor: recipe.lookFor,
+    measures: recipe.measures,
+    confirms: recipe.confirms,
+    refutes: recipe.refutes,
+    noRecipeReason: recipe.noRecipeReason,
     summary:
       status === 'questionable'
         ? 'Not measured, and the benefit depends entirely on data speeDB cannot see. Run the plan before trusting this.'

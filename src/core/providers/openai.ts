@@ -94,7 +94,21 @@ export class OpenAiProvider implements LlmProvider {
           model: this.model,
           ...(withTemperature ? { temperature: req.temperature } : {}),
           max_completion_tokens: req.maxOutputTokens,
-          response_format: { type: 'json_object' },
+          // `json_object` only promises *valid JSON*, not the right JSON: the
+          // model could return `{}` and satisfy it. `json_schema` promises the
+          // shape, and in strict mode the provider guarantees it rather than
+          // being asked. Falls back to `json_object` when no schema is supplied
+          // so a caller without one is no worse off than before.
+          response_format: req.schema
+            ? {
+                type: 'json_schema',
+                json_schema: {
+                  name: req.schema.name,
+                  strict: req.schema.strict,
+                  schema: req.schema.schema,
+                },
+              }
+            : { type: 'json_object' },
           messages: [
             { role: 'system', content: req.system },
             { role: 'user', content: req.user },

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { applyValueGate, severityCeiling, summariseGate } from '../analyze/gate'
 import { groundFindings } from '../analyze/ground'
+import { checkPerformance } from '../analyze/performance'
 import type { Finding, Severity } from '../types'
 import type { EnclosingScope } from '../detect/scope'
 import replay from '../../../bench/fixtures/mt-test-studio-2026-08-26.json'
@@ -55,7 +56,15 @@ function finding(over: Partial<Finding> & {
     groundingNotes: [],
     modelConfidence: 0.8,
     performance: over.performance,
+    triageSupport: over.triageSupport,
   }
+}
+
+/** A PerformanceCheck shaped for the severity and speculation rules. */
+function perf(counted: string[], status: 'unmeasured' | 'questionable' = 'unmeasured') {
+  return {
+    status, counted, unmeasured: [], verification: [], lookFor: [], confirms: [], refutes: [], summary: '',
+  } as Finding['performance']
 }
 
 const files = (content: string, path = 'app/views.py') => new Map([[path, content]])
@@ -151,7 +160,7 @@ describe('Fix 5 — one fixture per suppression reason', () => {
       category: 'n-plus-one',
       original: 'for sec in sections:\n    TestCase.objects.filter(section=sec).count()',
       proposed: 'TestCase.objects.filter(section__in=sections).values("section").annotate(n=Count("id"))',
-      performance: { status: 'unmeasured', counted: ['Issues 1 database call where the original issues 2.'], unmeasured: [], verification: [], lookFor: [], summary: '' },
+      performance: { status: 'unmeasured', counted: ['Issues 1 database call where the original issues 2.'], unmeasured: [], verification: [], lookFor: [], confirms: [], refutes: [], summary: '' },
     })], { files: files('x') })
 
     expect(gate.suppressed).toHaveLength(0)
@@ -176,7 +185,7 @@ describe('Fix 5 — one fixture per suppression reason', () => {
 
 describe('Fix 5 — severity derived from evidence, in both directions', () => {
   const withCounted = (counted: string[]): Finding['performance'] => ({
-    status: 'unmeasured', counted, unmeasured: [], verification: [], lookFor: [], summary: '',
+    status: 'unmeasured', counted, unmeasured: [], verification: [], lookFor: [], confirms: [], refutes: [], summary: '',
   })
 
   it('caps a migration finding at info, whatever the model said', () => {
@@ -273,6 +282,7 @@ describe('Fix 5 — the empty report is a good outcome', () => {
     const text = summariseGate({ published: [], suppressed: [], counts: {
       'no-op': 0, 'wrong-direction': 0, 'not-data-access': 0, 'cold-path': 0,
       'unsupported-assumption': 0, 'immaterial': 0, 'invented-symbol': 0,
+      'unsupported-speculation': 0,
     } }, 1115, 924)
     expect(text).toMatch(/No findings/)
     expect(text).toMatch(/1,115/)
@@ -355,6 +365,12 @@ describe('Fix 5 — replay of the 2026-08-26 mt-test-studio report', () => {
       'not-data-access': 2,
       'cold-path': 5,
       'unsupported-assumption': 1,
+      // Zero, and that is the assertion. This corpus predates sampled triage,
+      // so none of its findings carry `triageSupport` — and the speculation
+      // rule requires it. A gate rule that fired on findings it has no
+      // agreement data for would be guessing, which is the thing it exists to
+      // suppress.
+      'unsupported-speculation': 0,
       // The materiality rule adds nothing here: the one published finding is a
       // batching fix, not a column narrowing.
       'immaterial': 0,
@@ -397,7 +413,7 @@ describe('Phase 4 — materiality', () => {
     performance: {
       status: 'unmeasured',
       counted: ['Fetches 2 named column(s) instead of whole model instances. (Counted, not measured.)'],
-      unmeasured: [], verification: [], lookFor: [], summary: '',
+      unmeasured: [], verification: [], lookFor: [], confirms: [], refutes: [], summary: '',
     },
     scope: { loopDepth: 0, loopHeaders: [], symbol: 'f', symbolLine: 1, opensLoop: false, trigger: 'request-handler' },
     ...over,
@@ -430,7 +446,7 @@ describe('Phase 4 — materiality', () => {
       const gate = applyValueGate([narrowing({
         performance: {
           status: 'unmeasured', counted: [fact],
-          unmeasured: [], verification: [], lookFor: [], summary: '',
+          unmeasured: [], verification: [], lookFor: [], confirms: [], refutes: [], summary: '',
         },
       })], { files: files('x') })
       expect(gate.published, fact).toHaveLength(1)
@@ -450,7 +466,7 @@ describe('Phase 4 — materiality', () => {
     // No counted facts means materiality has no evidence to weigh; that case
     // belongs to the severity derivation, not here.
     const gate = applyValueGate([narrowing({
-      performance: { status: 'unmeasured', counted: [], unmeasured: [], verification: [], lookFor: [], summary: '' },
+      performance: { status: 'unmeasured', counted: [], unmeasured: [], verification: [], lookFor: [], confirms: [], refutes: [], summary: '' },
     })], { files: files('x') })
     expect(gate.suppressed.filter((f) => f.suppression?.reason === 'immaterial')).toHaveLength(0)
   })
@@ -535,7 +551,7 @@ describe('a proposal that cannot run', () => {
       performance: {
         status: 'unmeasured',
         counted: ['Moves the query out of the loop: one call for the whole set instead of one per iteration.'],
-        unmeasured: [], verification: [], lookFor: [], summary: '',
+        unmeasured: [], verification: [], lookFor: [], confirms: [], refutes: [], summary: '',
       },
     })], { files: repo() })
 
@@ -552,7 +568,7 @@ describe('a proposal that cannot run', () => {
       performance: {
         status: 'unmeasured',
         counted: ['Moves the query out of the loop: one call for the whole set instead of one per iteration.'],
-        unmeasured: [], verification: [], lookFor: [], summary: '',
+        unmeasured: [], verification: [], lookFor: [], confirms: [], refutes: [], summary: '',
       },
     })], { files: repo() })
     expect(gate.published).toHaveLength(1)
@@ -569,9 +585,259 @@ describe('a proposal that cannot run', () => {
       performance: {
         status: 'unmeasured',
         counted: ['Moves the query out of the loop: one call for the whole set instead of one per iteration.'],
-        unmeasured: [], verification: [], lookFor: [], summary: '',
+        unmeasured: [], verification: [], lookFor: [], confirms: [], refutes: [], summary: '',
       },
     })], { files: files('x') })
     expect(gate.suppressed.filter((f) => f.suppression?.reason === 'invented-symbol')).toHaveLength(0)
+  })
+})
+
+
+describe('triage agreement is carried onto the finding and used', () => {
+  /*
+   * Sampled triage authors the *union* of what any sample flagged, which is
+   * what keeps recall up — a site only has to be caught once. The cost is that
+   * a site one sample flagged, and the other two read and called clean, reaches
+   * authoring on identical footing to one every sample flagged. The model,
+   * handed a site as a problem, will generally write it up.
+   *
+   * The count was already computed and was being thrown away. These tests pin
+   * where it is allowed to matter, and — more importantly — where it is not.
+   */
+
+  it('does not rate down a weakly-supported site that counted a structural fact', () => {
+    // The load-bearing case. Agreement is evidence about the *site*; a counted
+    // fact is evidence about the *rewrite*, and the second is stronger. This is
+    // exactly the finding two samples missed and one caught — the variance
+    // sampling exists to cover. Demoting it would undo the recall the union
+    // just bought, which would make sampling pointless.
+    const gate = applyValueGate([finding({
+      scope: handlerScope,
+      triageSupport: { flagged: 1, samples: 3 },
+      performance: perf(['Issues 1 database call where the original issues 400.']),
+    })], { files: files('x') })
+
+    expect(gate.published).toHaveLength(1)
+    expect(gate.published[0]!.severity).toBe('high')
+    expect(gate.published[0]!.groundingNotes.join(' ')).not.toMatch(/Rated down/)
+  })
+
+  it('rates down a weakly-supported site with nothing counted', () => {
+    const gate = applyValueGate([finding({
+      scope: handlerScope,
+      triageSupport: { flagged: 1, samples: 3 },
+      performance: perf([]),
+    })], { files: files('x') })
+
+    expect(gate.published).toHaveLength(1)
+    // medium (per-iteration, request path, nothing counted) -> low.
+    expect(gate.published[0]!.severity).toBe('low')
+    expect(gate.published[0]!.groundingNotes.join(' ')).toMatch(/1 of 3 triage samples/)
+  })
+
+  it('leaves a well-supported site alone', () => {
+    const gate = applyValueGate([finding({
+      scope: handlerScope,
+      triageSupport: { flagged: 3, samples: 3 },
+      performance: perf([]),
+    })], { files: files('x') })
+    expect(gate.published[0]!.severity).toBe('medium')
+  })
+
+  it('does nothing at all when sampling is off', () => {
+    // Fast mode runs one sample, so every site is 1-of-1 and the ratio is
+    // meaningless. Firing here would silently demote every finding of every
+    // scan run in Fast mode — the ratio needs at least three samples before
+    // 1-of-N says anything.
+    for (const support of [{ flagged: 1, samples: 1 }, { flagged: 1, samples: 2 }]) {
+      const gate = applyValueGate([finding({
+        scope: handlerScope, triageSupport: support, performance: perf([]),
+      })], { files: files('x') })
+      expect(gate.published[0]!.severity).toBe('medium')
+    }
+  })
+
+  it('suppresses the case where all three signals are empty', () => {
+    // Data-dependent category, nothing counted, and the other samples read the
+    // same code and called it clean. Nothing here is checkable from source.
+    const gate = applyValueGate([finding({
+      category: 'missing-index',
+      scope: handlerScope,
+      triageSupport: { flagged: 1, samples: 3 },
+      performance: perf([], 'questionable'),
+    })], { files: files('x') })
+
+    expect(gate.published).toHaveLength(0)
+    expect(gate.suppressed).toHaveLength(1)
+    expect(gate.suppressed[0]!.suppression!.reason).toBe('unsupported-speculation')
+    // Held back with its reason, not dropped — a gate that silently eats a true
+    // positive is worse than the padding it removes.
+    expect(gate.suppressed[0]!.suppression!.detail).toMatch(/1 of 3 triage samples/)
+  })
+
+  it('publishes when any one of the three signals is present', () => {
+    const base = {
+      category: 'missing-index' as const,
+      scope: handlerScope,
+      triageSupport: { flagged: 1, samples: 3 },
+      performance: perf([], 'questionable' as const),
+    }
+    // Each of these alone is an ordinary finding. Only all three at once is a
+    // guess, which is why the rule requires the conjunction.
+    const variants = [
+      { ...base, triageSupport: { flagged: 3, samples: 3 } },      // agreed on
+      { ...base, performance: perf(['Transfers 3 fewer columns.'], 'questionable') },
+      { ...base, performance: perf([]) },                           // not data-dependent
+    ]
+    for (const v of variants) {
+      const gate = applyValueGate([finding(v)], { files: files('x') })
+      expect(gate.published).toHaveLength(1)
+    }
+  })
+})
+
+
+describe('invented-symbol and framework constants', () => {
+  /*
+   * Regression, found by running the benchmark against spring-petclinic rather
+   * than by reasoning about the rule. All three findings that repository exists
+   * to test — `FetchType.EAGER` -> `FetchType.LAZY` on Owner, Pet and Vet —
+   * were suppressed as invented symbols. `FetchType` is imported in all three
+   * entity files; `LAZY` appears in none, because it is an enum constant in
+   * `jakarta.persistence`, a jar this tool never reads.
+   *
+   * The strings below are verbatim from that run.
+   */
+  const javaVocabulary = new Map(
+    Array.from({ length: 30 }, (_, i) => [
+      `src/main/java/Entity${i}.java`,
+      'import jakarta.persistence.FetchType;\n'.repeat(20) +
+      '@OneToMany(cascade = CascadeType.ALL, fetch = FetchType.EAGER)\n'.repeat(40) +
+      'private final List<Pet> pets = new ArrayList<>();\n'.repeat(40),
+    ]),
+  )
+
+  it('does not call a constant on a known type invented', () => {
+    const gate = applyValueGate([finding({
+      file: 'src/main/java/Entity0.java',
+      original: '@OneToMany(cascade = CascadeType.ALL, fetch = FetchType.EAGER)',
+      proposed: '@OneToMany(cascade = CascadeType.ALL, fetch = FetchType.LAZY)',
+      performance: perf(['Fetches related rows only when accessed.']),
+    })], { files: javaVocabulary })
+
+    // Scoped to this rule. A bare JPA annotation is separately judged
+    // `not-data-access`, which is a different question and has its own tests.
+    expect(gate.suppressed.map((f) => f.suppression?.reason)).not.toContain('invented-symbol')
+  })
+
+  it('still catches a lowercase attribute that does not exist', () => {
+    // The narrowness is the point. A lowercase member on a known receiver is an
+    // attribute this tool *can* see in the source, so its absence still means
+    // the rewrite would fail at runtime.
+    const gate = applyValueGate([finding({
+      file: 'src/main/java/Entity0.java',
+      original: 'owner.getPets()',
+      proposed: 'owner.getVaccinationSchedule()',
+    })], { files: javaVocabulary })
+
+    expect(gate.suppressed[0]?.suppression?.reason).toBe('invented-symbol')
+  })
+
+  it('still catches a constant on a receiver the repository does not know', () => {
+    // An unknown receiver means the whole expression is invented, not just the
+    // member — abstaining there would defeat the rule entirely.
+    const gate = applyValueGate([finding({
+      file: 'src/main/java/Entity0.java',
+      original: 'FetchType.EAGER',
+      proposed: 'MadeUpEnum.SOME_MODE',
+    })], { files: javaVocabulary })
+
+    expect(gate.suppressed[0]?.suppression?.reason).toBe('invented-symbol')
+  })
+})
+
+
+describe('JPA fetch mode is data access', () => {
+  /*
+   * Second regression from the same spring-petclinic run. With the
+   * invented-symbol false positive fixed, all three findings fell straight
+   * through to `not-data-access` — because `readOrmShape` did not recognise a
+   * JPA mapping annotation as data access at all.
+   *
+   * An association's fetch mode is not near the data access; it is the
+   * declaration that decides whether reading a list of parents costs one query
+   * or one per parent. Between them these two rules are why this repository
+   * published zero findings in every run ever recorded for it, while the
+   * corpus notes list `FetchType.LAZY` N+1 as the thing it exists to test.
+   */
+  const files = new Map(
+    Array.from({ length: 30 }, (_, i) => [
+      `src/main/java/E${i}.java`,
+      'import jakarta.persistence.FetchType;\n'.repeat(20) +
+      '@OneToMany(cascade = CascadeType.ALL, fetch = FetchType.EAGER)\n'.repeat(40) +
+      'private final List<Pet> pets = new ArrayList<>();\n'.repeat(40),
+    ]),
+  )
+
+  const verbatim = {
+    file: 'src/main/java/E0.java',
+    original: '@OneToMany(cascade = CascadeType.ALL, fetch = FetchType.EAGER)\n\t@JoinColumn(name = "owner_id")',
+    proposed: '@OneToMany(cascade = CascadeType.ALL, fetch = FetchType.LAZY)\n\t@JoinColumn(name = "owner_id")',
+  }
+
+  it('does not read 0-vs-0 calls as evidence of the wrong direction', () => {
+    /*
+     * Third layer of the same spring-petclinic failure, and the subtlest. With
+     * the first two fixed, `wrong-direction` suppressed all three with
+     * "issues 0 database calls where the original issues 0" — a sentence that
+     * reads as a measurement and is an absence of one. A mapping declaration
+     * contains no call by construction, so the comparison is guaranteed to fire
+     * and can never be informative. The round-trip effect lives at the call
+     * sites, not in the declaration.
+     */
+    const gate = applyValueGate(
+      [finding({ ...verbatim, category: 'n-plus-one' })],
+      { files },
+    )
+    expect(gate.suppressed.map((f) => f.suppression?.reason)).not.toContain('wrong-direction')
+  })
+
+  it('still catches a genuine wrong-direction claim', () => {
+    // The narrowing must not disarm the rule where it has a real count.
+    const pyFiles = new Map(
+      Array.from({ length: 30 }, (_, i) => [
+        `app/m${i}.py`,
+        'Product.objects.filter(pk=pk).first()\n'.repeat(40) +
+        'Review.objects.filter(product=pk).first()\n'.repeat(40),
+      ]),
+    )
+    const gate = applyValueGate([finding({
+      file: 'app/m0.py',
+      category: 'n-plus-one',
+      original: 'Product.objects.filter(pk=pk).first()',
+      proposed: 'Product.objects.filter(pk=pk).first()\nReview.objects.filter(product=pk).first()',
+    })], { files: pyFiles })
+    expect(gate.suppressed[0]?.suppression?.reason).toBe('wrong-direction')
+  })
+
+  it('publishes a fetch-mode change instead of calling it not-data-access', () => {
+    const gate = applyValueGate([finding({ ...verbatim, category: 'over-fetch' })], { files })
+    expect(gate.suppressed.map((f) => f.suppression?.reason)).not.toContain('not-data-access')
+    expect(gate.published).toHaveLength(1)
+  })
+
+  it('counts the change and names the round-trip risk it creates', () => {
+    // The honest half. Eager -> lazy is the one rewrite here whose round-trip
+    // effect can run the wrong way: if a caller iterates parents and touches
+    // the collection, lazy turns one eager load into one query per parent —
+    // the N+1 this tool exists to find, introduced by its own suggestion.
+    const check = checkPerformance({
+      engine: 'mysql',
+      category: 'over-fetch',
+      original: verbatim.original,
+      proposed: verbatim.proposed,
+    })
+    expect(check.counted.join(' ')).toMatch(/no longer loaded with the parent/)
+    expect(check.unmeasured.join(' ')).toMatch(/one query per parent/)
   })
 })

@@ -57,6 +57,19 @@ export interface OrmShape {
   aggregates: string[]
   /** The result is materialised once — `list(qs)`, `.to_a`, `Array.from`. */
   materialised: boolean
+  /**
+   * The association fetch mode this snippet declares, for ORMs where it is a
+   * declaration rather than a call — JPA/Hibernate `FetchType`, principally.
+   *
+   * Kept apart from `eagerLoads` because it is not the same claim. An
+   * `@EntityGraph` or a `JOIN FETCH` is a *per-query* instruction; a
+   * `FetchType` is a property of the mapping and applies to every read of that
+   * entity, everywhere. Changing it is a wider change than changing a query,
+   * and the trade-off runs in both directions — which is why
+   * `performance.ts` reports it as a counted structural fact with the round-trip
+   * risk named beside it, rather than as a win.
+   */
+  fetchMode: 'eager' | 'lazy' | null
 }
 
 interface DialectSpec {
@@ -206,10 +219,23 @@ const DIALECTS: DialectSpec[] = [
   {
     dialect: 'hibernate',
     evaluators: /\.\s*(?:getResultList|getSingleResult|getResultStream|find|persist|merge|remove|save|saveAll|saveAndFlush|delete|deleteAll|findAll|findById|count|flush)\s*\(/g,
-    detect: /\bEntityManager\b|\bcreateQuery\s*\(|\bCriteriaBuilder\b|@(?:Query|NamedQuery|EntityGraph)\b|\bgetResultList\b/,
+    /*
+     * JPA *mapping* annotations are data access, and leaving them out was a
+     * false negative with real consequences.
+     *
+     * Found by running the benchmark: on spring-petclinic all three findings
+     * the repository exists to test propose `fetch = FetchType.EAGER` ->
+     * `FetchType.LAZY`, and every one was suppressed as `not-data-access`
+     * because neither side parsed as a query. An association's fetch mode is
+     * not merely near the data access — it *is* the declaration that decides
+     * whether reading a list of parents costs one query or one per parent.
+     * That is the single most valuable thing this tool looks for, and the
+     * shape reader could not see it.
+     */
+    detect: /\bEntityManager\b|\bcreateQuery\s*\(|\bCriteriaBuilder\b|@(?:Query|NamedQuery|EntityGraph)\b|\bgetResultList\b|@(?:OneToMany|ManyToMany|ManyToOne|OneToOne|ElementCollection)\b|\bFetchType\s*\.\s*(?:EAGER|LAZY)\b/,
     calls: /\.\s*(?:getResultList|getSingleResult|createQuery|createNativeQuery|find|persist|merge|remove|saveAll|save|findAll|findById|count)\s*\(/g,
     terminals: /\.\s*(getResultList|getSingleResult|findAll|findById|count)\s*\(/g,
-    eager: /@EntityGraph\b|\bJOIN\s+FETCH\b|@BatchSize\b/g,
+    eager: /@EntityGraph\b|\bJOIN\s+FETCH\b|@BatchSize\b|\bFetchType\s*\.\s*EAGER\b/g,
     projection: /\bSELECT\s+(?:new\s+\S+\s*\()?([\w.,\s]+?)\s+FROM\b/gi,
     limit: /\.\s*setMaxResults\s*\(\s*(\d+)\s*\)/,
     predicate: /\bWHERE\s+([^)]*?)(?:\bORDER\b|\bGROUP\b|$)/gi,
@@ -267,7 +293,24 @@ export function readOrmShape(code: string, scope?: EnclosingScope | null): OrmSh
   // `calls` answers "is this ORM code?"; `evaluators` answers "how many round
   // trips?". They are different questions and were the same regex.
   const calls = matchCount(code, spec.calls)
-  if (calls === 0) return null
+
+  /*
+   * A mapping *declaration* is data access with zero calls in it.
+   *
+   * `calls === 0 -> null` is right for ordinary code — it is what stops a
+   * string-building helper being read as a query. It is wrong for a JPA
+   * association mapping, which contains no call by construction and yet
+   * determines the round-trip cost of every read of that entity. Requiring a
+   * call meant `@OneToMany(fetch = FetchType.EAGER)` parsed as "not data
+   * access", and the value gate then suppressed every finding about it.
+   */
+  const fetchMode: OrmShape['fetchMode'] = /\bFetchType\s*\.\s*EAGER\b/.test(code)
+    ? 'eager'
+    : /\bFetchType\s*\.\s*LAZY\b/.test(code)
+      ? 'lazy'
+      : null
+
+  if (calls === 0 && fetchMode === null) return null
   const roundTrips = matchCount(code, spec.evaluators)
 
   const terminals = [...new Set(captureAll(code, spec.terminals).map((s) => s.trim()))]
@@ -311,6 +354,7 @@ export function readOrmShape(code: string, scope?: EnclosingScope | null): OrmSh
     // materialised issues one. Both sides have the same call count, so the
     // difference is invisible to `queryCount` and has to be read directly.
     materialised: /\blist\s*\(|\.\s*to_a\b|\bArray\.from\s*\(|\btolist\s*\(/i.test(code),
+    fetchMode,
   }
 }
 
