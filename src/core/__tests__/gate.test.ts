@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyValueGate, severityCeiling, summariseGate } from '../analyze/gate'
+import { applyValueGate, judgeSemanticNoOp, severityCeiling, summariseGate } from '../analyze/gate'
 import { groundFindings } from '../analyze/ground'
 import { checkPerformance } from '../analyze/performance'
 import type { Finding, Severity } from '../types'
@@ -839,5 +839,83 @@ describe('JPA fetch mode is data access', () => {
     })
     expect(check.counted.join(' ')).toMatch(/no longer loaded with the parent/)
     expect(check.unmeasured.join(' ')).toMatch(/one query per parent/)
+  })
+})
+
+
+describe('no-op with different text', () => {
+  /*
+   * From adjudicating mt-test-studio run-1: three of the four false positives
+   * emitted byte-identical SQL, and the whitespace-collapse rule saw three
+   * different strings. One of them was published at `high` with grounding
+   * `verified`. Strings below are verbatim from that run.
+   */
+
+  it('knows .only() is inert before .exists()', () => {
+    /*
+     * `.only()` controls which columns are SELECTed when a model instance is
+     * materialised. `.exists()` materialises nothing — it compiles to
+     * `SELECT (1) AS a1 ... LIMIT 1` and never reads the deferred-field set.
+     * The two statements are the same statement.
+     */
+    const v = judgeSemanticNoOp(
+      'if (\n  old_run_gid\n  and TestRun.objects.filter(global_id=old_run_gid).exists()\n):',
+      'if old_run_gid and TestRun.objects.filter(global_id=old_run_gid).only("pk").exists():',
+    )
+    expect(v?.reason).toBe('no-op')
+  })
+
+  it('sees through redundant parentheses, including nested ones', () => {
+    // `get((Q(a) | Q(b)))` -> `get(Q(a) | Q(b))`. The inner group contains
+    // parentheses of its own, which is why this needs a balanced scan and not
+    // a character class.
+    const v = judgeSemanticNoOp(
+      'return User.objects.get((Q(email=value) | Q(username=value)))',
+      'return User.objects.get(Q(email=value) | Q(username=value))',
+    )
+    expect(v?.reason).toBe('no-op')
+  })
+
+  it('does not fire on .only() before a call that DOES materialise', () => {
+    // The boundary that keeps this honest. `.first()` returns an instance, so
+    // the deferred-field set decides which columns are fetched — dropping
+    // `.only()` there is a real change.
+    expect(judgeSemanticNoOp('qs.only("pk").first()', 'qs.first()')).toBeNull()
+  })
+
+  it('does not fire on .values(), which changes what the queryset yields', () => {
+    expect(judgeSemanticNoOp('qs.values("pk").exists()', 'qs.exists()')).toBeNull()
+  })
+
+  it('does not fire when the parentheses are grouping, not redundancy', () => {
+    expect(judgeSemanticNoOp('if (a and b):', 'if (a or b):')).toBeNull()
+    expect(judgeSemanticNoOp('User.objects.get(Q(a=1) | Q(b=2))', 'User.objects.get(Q(a=1), Q(b=2))')).toBeNull()
+  })
+
+  it('does not fire on a real rewrite', () => {
+    expect(judgeSemanticNoOp(
+      'Tag.objects.filter(name=n).first()',
+      'Tag.objects.filter(name__in=names)',
+    )).toBeNull()
+  })
+
+  it('suppresses through the full gate, not just the helper', () => {
+    const files = new Map(
+      Array.from({ length: 30 }, (_, i) => [
+        `app/m${i}.py`,
+        'TestRun.objects.filter(global_id=old_run_gid).exists()\n'.repeat(40) +
+        'old_run_gid = request.POST.get("gid")\n'.repeat(40),
+      ]),
+    )
+    const gate = applyValueGate([finding({
+      file: 'app/m0.py',
+      severity: 'high',
+      category: 'missing-index',
+      original: 'if (old_run_gid and TestRun.objects.filter(global_id=old_run_gid).exists()):',
+      proposed: 'if old_run_gid and TestRun.objects.filter(global_id=old_run_gid).only("pk").exists():',
+    })], { files })
+
+    expect(gate.published).toHaveLength(0)
+    expect(gate.suppressed[0]!.suppression!.reason).toBe('no-op')
   })
 })

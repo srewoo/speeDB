@@ -1,0 +1,58 @@
+{
+  "id": "661317e6-mt9ps7ov",
+  "repo": {
+    "forge": "github",
+    "apiOrigin": "https://api.github.com",
+    "owner": "chalk",
+    "name": "chalk",
+    "ref": "661317e6f91fe7c90306c2c48ea9354562ee9146",
+    "commitSha": "661317e6f91fe7c90306c2c48ea9354562ee9146"
+  },
+  "createdAt": "2026-08-26T06:30:00.175Z",
+  "provider": "anthropic",
+  "model": "claude-sonnet-5",
+  "findings": [],
+  "rejected": [],
+  "suppressed": [],
+  "engineProfile": {
+    "declared": [],
+    "primary": "unknown",
+    "ambiguous": false
+  },
+  "schema": {
+    "tables": 0,
+    "indexes": 0,
+    "sources": [],
+    "unknowable": [
+      "Row counts — no table size is recoverable from source.",
+      "Column selectivity and data distribution.",
+      "Which indexes actually exist in production, versus which were declared in a migration that may have been superseded, reverted, or never run.",
+      "Index bloat, and whether an existing index is used at all."
+    ]
+  },
+  "stats": {
+    "filesInTree": 26,
+    "filesFetched": 26,
+    "filesSkipped": 0,
+    "ingest": "archive",
+    "apiCalls": 3,
+    "candidatesFound": 0,
+    "sitesMatched": 0,
+    "sitesSampled": 0,
+    "sitesAnalysed": 0,
+    "sitesFiltered": {
+      "belowConfidence": 0,
+      "lowPriority": 0
+    },
+    "truncatedFiles": [],
+    "chunksAnalysed": 0,
+    "promptTokens": 0,
+    "completionTokens": 0,
+    "chunksReused": 0,
+    "elapsedMs": 1536
+  },
+  "scope": {
+    "kind": "repository"
+  },
+  "candidates": []
+}

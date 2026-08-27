@@ -404,6 +404,51 @@ export const RULES: DetectRule[] = [
   },
   { name: 'gorm', pattern: /\b(?:db|tx)\s*\.\s*(?:Where|Preload|Joins|Find|First|Model|Scan)\s*\(/g,
     engine: 'unknown', accessStyle: 'orm', confidence: 0.75, extensions: ['go'] },
+  /*
+   * XORM, which is not GORM and was not matched by anything.
+   *
+   * Found by auditing gitea and scoring the result: candidate coverage was 0%.
+   * Three of the four audited defects produced **zero** candidates and the
+   * fourth produced three, none at the defect line. The rule above is the only
+   * Go data-access rule and it requires the receiver to be literally `db` or
+   * `tx` and the method to be one of seven GORM names. XORM's idioms share
+   * neither:
+   *
+   *   db.Insert(ctx, row)                                  helper verb
+   *   db.GetEngine(ctx).ID(o.ID).Cols(...).Update(o)       engine accessor
+   *   sess.ID(s.ID).Cols(...).Update(s)                    session chain
+   *   x.Where("repo_id=?", id).Find(&rows)                 engine chain
+   *
+   * `bench/repos.json` describes gitea as "Go · XORM + raw SQL" and calls it
+   * the hardest engine-inference case in the corpus, so this was a documented
+   * target with no rule behind it — the raw-SQL rule carried the whole
+   * repository.
+   *
+   * Precision-first, in the same way the MongoDB rule is. A bare `.Find(` would
+   * match goquery's `doc.Find(".selector")`, which gitea's own tests are full
+   * of, so no alternative here matches a verb alone:
+   *
+   *   1. `db.GetEngine(` is unambiguous — it exists to return an ORM session.
+   *   2. A helper verb must take `ctx` as its first argument, which is the
+   *      shape of a data-access helper and not of a string utility.
+   *   3. A builder chain must start from a session/engine receiver AND end in a
+   *      terminal, so `.Cols(...)` or `.ID(...)` alone is not enough.
+   */
+  { name: 'xorm',
+    pattern: new RegExp(
+      String.raw`\bdb\s*\.\s*GetEngine\s*\(` +
+      String.raw`|\bdb\s*\.\s*(?:Insert|Find|Get|Count|Exist|Update|Delete|Iterate|WithTx)\s*\(\s*ctx\b` +
+      String.raw`|\b(?:sess|session|x|e|engine)\s*\.\s*(?:ID|Where|Table|Cols|In|Limit|Join|SQL|Asc|Desc)\s*\([^)]*\)\s*(?:\.\s*\w+\s*\([^)]*\)\s*)*\.\s*(?:Find|Get|Count|Exist|Update|Insert|Delete|Iterate|Rows)\s*\(` +
+      // A bare verb, but only on a receiver that is unambiguously an XORM
+      // session. `sess.Delete(collaboration)` is data access with no builder
+      // chain in front of it, so the alternative above cannot see it. `x` and
+      // `e` are deliberately NOT allowed here: `x.Find(` is goquery in gitea's
+      // own test helpers, and `e.Get(` is an element accessor in half the Go
+      // ecosystem. `sess`/`session` carry no such collision.
+      String.raw`|\b(?:sess|session)\s*\.\s*(?:Insert|Update|Delete|Get|Find|Count|Exist|Iterate)\s*\(`,
+      'g',
+    ),
+    engine: 'unknown', accessStyle: 'orm', confidence: 0.78, extensions: ['go'] },
   { name: 'hibernate-jpa', pattern: /@(?:Query|NamedQuery|EntityGraph)\s*\(|\bcreateQuery\s*\(|\bEntityManager\b|\bCriteriaBuilder\b|FetchType\.(?:LAZY|EAGER)/g,
     engine: 'unknown', accessStyle: 'orm', confidence: 0.8, extensions: JVM },
   { name: 'ef-core', pattern: /\b(?:DbSet<|\.\s*Include\s*\(|\.\s*ThenInclude\s*\(|AsNoTracking\s*\(\s*\)|FromSqlRaw)\b/g,

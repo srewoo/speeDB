@@ -161,6 +161,10 @@ function judge(
     }
   }
 
+  /* 1b-ii. no-op — different text, identical behaviour. */
+  const inert = judgeSemanticNoOp(original, proposed)
+  if (inert) return inert
+
   /* 1c. invented-symbol — the proposal cannot run. */
   //
   // Placed here, ahead of every judgement about *what kind* of finding this is,
@@ -629,6 +633,129 @@ export const LABELS: Record<SuppressionReason, string> = {
   'immaterial': 'immaterial (a column narrowing on a query that runs once)',
   'invented-symbol': 'invented symbol (the proposal names something the repository does not contain)',
   'unsupported-speculation': 'unsupported speculation (nothing counted, weak triage support, benefit is data-dependent)',
+}
+
+/**
+ * A rewrite whose text differs and whose behaviour does not.
+ *
+ * The whitespace comparison above catches reformatting. It cannot catch a
+ * change that is real text and no change at all, and adjudicating one real run
+ * found three of them among four false positives — every one published, one at
+ * `high` with grounding `verified`:
+ *
+ *   `.only("pk").exists()`  vs  `.exists()`
+ *   `get((Q(a) | Q(b)))`    vs  `get(Q(a) | Q(b))`
+ *   a queryset re-indented into a `for` header, whose own equivalence argument
+ *   opened "The proposed code is identical to the original."
+ *
+ * Each emits byte-identical SQL. Publishing them is worse than publishing a
+ * merely weak finding: a reader who applies one and measures nothing learns
+ * that the tool's `high` band is not worth reading.
+ *
+ * The approach is deliberately narrow — normalise the handful of constructs
+ * that are *provably* inert, then compare. It is not an attempt at semantic
+ * equivalence in general, which needs a solver; it is a list of things known to
+ * do nothing, each of which has to be defensible on its own.
+ */
+export function judgeSemanticNoOp(original: string, proposed: string): Suppression | null {
+  const a = normaliseInert(original)
+  const b = normaliseInert(proposed)
+  if (a !== b || a.length === 0) return null
+
+  return {
+    reason: 'no-op',
+    detail:
+      'The proposal reads differently but does the same thing: once inert constructs are ' +
+      'normalised (redundant parentheses, and column-selection calls that have no effect on ' +
+      'the statement they precede) the two versions are identical, so they emit the same SQL. ' +
+      'There is nothing to apply.',
+  }
+}
+
+/**
+ * Constructs that provably do not change the emitted statement.
+ *
+ * `.only()` / `.defer()` before `.exists()` or `.count()` is the load-bearing
+ * case. Those methods control which columns are SELECTed when a model instance
+ * is *materialised*; `.exists()` materialises nothing — it compiles to
+ * `SELECT (1) AS a1 ... LIMIT 1` — and `.count()` compiles to `SELECT COUNT(*)`.
+ * Neither reads the deferred-field set at all, so removing the call changes
+ * nothing. `.values()`/`.values_list()` are deliberately NOT included: they do
+ * change what a queryset yields.
+ *
+ * Redundant parentheses are the other, and they need a balanced scan rather
+ * than a regex — the real case was `get((Q(a) | Q(b)))`, whose inner group
+ * contains parentheses of its own, so a character-class pattern cannot see it.
+ */
+function normaliseInert(code: string): string {
+  let out = collapse(code)
+
+  // `.only(...)` / `.defer(...)` immediately preceding a call that materialises
+  // nothing. Repeated so `.only(...).defer(...).exists()` collapses fully.
+  const INERT_BEFORE_SCALAR = /\.\s*(?:only|defer)\s*\([^()]*\)\s*(?=\.\s*(?:exists|count)\s*\()/g
+  let previous: string
+  do {
+    previous = out
+    out = out.replace(INERT_BEFORE_SCALAR, '')
+  } while (out !== previous)
+
+  do {
+    previous = out
+    out = stripRedundantParens(out)
+  } while (out !== previous)
+
+  // Python treats `if (cond):` and `if cond:` identically. The trailing colon
+  // is dropped alongside so a statement and its bare expression compare equal —
+  // which is what makes the `if`-wrapped and unwrapped forms of the same
+  // condition register as the same code.
+  out = out.replace(/\b(if|elif|while|return|assert)\s+/g, '$1 ').replace(/\s*:\s*$/, '')
+
+  return out.replace(/\s+/g, ' ').trim()
+}
+
+/**
+ * Remove one layer of parentheses that wraps nothing but another complete
+ * group, or that wraps an entire `if` / `while` / `return` operand.
+ *
+ * Balanced, because the constructs this exists for are nested: `((Q(a) | Q(b)))`
+ * and `if ( x and y.filter(z).exists() ):`.
+ */
+function stripRedundantParens(code: string): string {
+  for (let i = 0; i < code.length; i++) {
+    if (code[i] !== '(') continue
+    const close = matchingParen(code, i)
+    if (close === -1) continue
+
+    const inner = code.slice(i + 1, close).trim()
+    if (inner.length === 0) continue
+
+    // `f((x))` — the outer pair encloses exactly one complete group.
+    if (inner.startsWith('(') && matchingParen(inner, 0) === inner.length - 1) {
+      return code.slice(0, i) + '(' + inner.slice(1, -1).trim() + ')' + code.slice(close + 1)
+    }
+
+    // `if ( cond ):` — the pair follows a keyword and is the whole operand.
+    const before = code.slice(0, i).trimEnd()
+    const after = code.slice(close + 1).trim()
+    const keyword = /\b(?:if|elif|while|return|assert|not)$/.test(before)
+    if (keyword && (after === '' || after === ':')) {
+      return `${before} ${inner}${after}`
+    }
+  }
+  return code
+}
+
+/** Index of the `)` closing the `(` at `from`, or -1 when unbalanced. */
+function matchingParen(code: string, from: number): number {
+  let depth = 0
+  for (let i = from; i < code.length; i++) {
+    if (code[i] === '(') depth++
+    else if (code[i] === ')') {
+      depth--
+      if (depth === 0) return i
+    }
+  }
+  return -1
 }
 
 function collapse(s: string): string {

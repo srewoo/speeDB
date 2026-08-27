@@ -1,0 +1,46 @@
+[
+  {
+    "_note": "SAMPLED, NOT EXHAUSTIVE. cal.com is ~7,700 files; this audit read the loop-bearing Prisma call sites under packages/trpc, packages/features and apps/web/app/api rather than every file. Precision scored against it is a FLOOR, not a precision figure. Recall @ high is meaningful: every entry was confirmed by reading the enclosing function in full.",
+    "_auditedBy": "Claude, blind to speeDB output for this repository",
+    "file": "packages/trpc/server/routers/viewer/bookings/get.handler.ts",
+    "startLine": 760,
+    "endLine": 769,
+    "enclosingSymbol": "getHandler",
+    "trigger": "request-handler",
+    "loopDepth": 1,
+    "category": "n-plus-one",
+    "severity": "high",
+    "queriesNow": "1 booking.findUnique per booking in the page that has fromReschedule set",
+    "queriesAfter": "1 booking.findMany with `uid: { in: [...] }` before the map, then a lookup in memory",
+    "why": "`plainBookings.map(async (booking) => ...)` issues prisma.booking.findUnique({ where: { uid: booking.fromReschedule } }) per row to read a single `rescheduledBy` column; Promise.all makes the calls concurrent but does not reduce their number, and this is the main bookings list handler.",
+    "outputIdentical": true
+  },
+  {
+    "file": "packages/features/credentials/handleDeleteCredential.ts",
+    "startLine": 143,
+    "endLine": 156,
+    "enclosingSymbol": "handleDeleteCredential",
+    "trigger": "request-handler",
+    "loopDepth": 1,
+    "category": "round-trip",
+    "severity": "high",
+    "queriesNow": "1 destinationCalendar.findUnique plus 1 delete per event type, and a separate eventType.update per event type",
+    "queriesAfter": "delete directly by the id already in hand; batch the location updates",
+    "why": "The findUnique re-fetches a row the loop already holds — the branch condition just read eventType.destinationCalendar?.credential?.appId — so it is a wholly redundant round trip per event type, followed by a delete that only needs that id.",
+    "outputIdentical": true
+  },
+  {
+    "file": "apps/web/app/api/cron/bookingReminder/route.ts",
+    "startLine": 146,
+    "endLine": 152,
+    "enclosingSymbol": "handler",
+    "trigger": "job",
+    "loopDepth": 1,
+    "category": "batching",
+    "severity": "medium",
+    "queriesNow": "1 reminderMail.create per booking reminded",
+    "queriesAfter": "one createMany after the loop",
+    "why": "The cron writes a reminderMail row per booking inside `for (const booking of bookingsToRemind...)`; the rows are independent and could be accumulated and inserted once.",
+    "outputIdentical": true
+  }
+]

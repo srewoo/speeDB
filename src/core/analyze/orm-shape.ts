@@ -105,10 +105,33 @@ interface DialectSpec {
   order: RegExp
 }
 
+/*
+ * A note on Django's `evaluators`, and specifically the `list(...)` clause.
+ *
+ * It used to require the wrapped expression to contain `.objects.` literally:
+ * `list(Foo.objects.filter(...))` counted as a round trip, and
+ * `list(self.fields["case"].queryset.values_list("plan", flat=True))` counted
+ * as nothing — because a queryset reached through an attribute has no
+ * `.objects.` in the text.
+ *
+ * That gap published a false positive. In `CloneCaseForm.populate`, `plan_ids`
+ * is a lazy queryset, so Django compiles `pk__in=plan_ids` into a subquery —
+ * one round trip. A proposal wrapped it in `list(...)`, forcing a separate
+ * evaluation: two round trips where there was one. Both sides counted 0
+ * evaluating calls, so the value gate's wrong-direction rule had nothing to
+ * compare and let it through, and it published as `equivalent` at `medium`.
+ *
+ * The clause now recognises the shapes a queryset actually arrives in — an
+ * attribute (`.queryset`), a related manager (`_set.`), or a builder call
+ * (`.filter(`, `.values_list(`, `.annotate(`, …) — rather than only the
+ * manager. It stays precision-first: a marker is still required, so
+ * `len(request.POST.getlist("tag"))` and `list(some_dict.keys())` count
+ * nothing, which is correct.
+ */
 const DIALECTS: DialectSpec[] = [
   {
     dialect: 'django',
-    evaluators: /\.\s*(?:count|exists|first|last|get|latest|earliest|aggregate|in_bulk)\s*\(|\.\s*(?:save|delete|create|update|bulk_create|bulk_update|get_or_create|update_or_create)\s*\(|\bfor\s+\w+(?:\s*,\s*\w+)*\s+in\s+[\w.]*(?:\.objects\.|_set\.)|\b(?:list|len|any|all|sum)\s*\(\s*[\w.]*\.objects\./g,
+    evaluators: /\.\s*(?:count|exists|first|last|get|latest|earliest|aggregate|in_bulk)\s*\(|\.\s*(?:save|delete|create|update|bulk_create|bulk_update|get_or_create|update_or_create)\s*\(|\bfor\s+\w+(?:\s*,\s*\w+)*\s+in\s+[\w.]*(?:\.objects\.|_set\.)|\b(?:list|len|any|all|sum|sorted|tuple|set)\s*\(\s*[^)]*?(?:\.objects\.|_set\.|\.queryset\b|\.\s*(?:filter|exclude|values_list|values|annotate|only|defer|select_related|prefetch_related)\s*\()/g,
     detect: /\.\s*objects\s*\.|\bQuerySet\b|\bF\s*\(|\bQ\s*\(|\bannotate\s*\(/,
     calls: /\.\s*objects\s*\.\s*\w+|\.\s*(?:count|exists|first|last|get|latest|earliest|aggregate|bulk_create|bulk_update|update|delete|create|save|in_bulk)\s*\(/g,
     terminals: /\.\s*(count|exists|first|last|get|all|aggregate|latest|earliest|values_list|values|in_bulk)\s*\(/g,

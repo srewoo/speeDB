@@ -114,8 +114,23 @@ for (const repo of targets) {
    * were merely unlisted. Precision needs a verdict on every published finding,
    * which is what an adjudication file carries.
    */
-  const adjPath = resolve(BENCH, 'truth', repo.id, `${repo.sha}-adjudication.json`)
-  const adjudication = existsSync(adjPath) ? JSON.parse(readFileSync(adjPath, 'utf8')) : null
+  /*
+   * Every adjudication for this commit, not just one.
+   *
+   * The path used to be a single `<sha>-adjudication.json`, so adjudicating a
+   * second run meant overwriting the first — and `AUDIT_PROMPT.md` calls the
+   * truth files "the durable asset. They get better every run." A scheme that
+   * discards the previous verdict list every time cannot get better every run.
+   *
+   * `adjudicatedPrecision` already refuses to apply an adjudication to a run it
+   * was not written against, so holding several is safe: each run picks its own.
+   */
+  // The control has no truth directory at all, by design — it is scored on
+  // publishing zero, not against an audit.
+  const truthDir = resolve(BENCH, 'truth', repo.id)
+  const adjudications = (existsSync(truthDir) ? readdirSync(truthDir) : [])
+    .filter((f) => f.startsWith(`${repo.sha}-adjudication`) && f.endsWith('.json'))
+    .map((f) => JSON.parse(readFileSync(resolve(BENCH, 'truth', repo.id, f), 'utf8')))
 
   // Runs are grouped by configuration, never pooled across configurations: two
   // different settings are two different experiments, and averaging them
@@ -125,6 +140,7 @@ for (const repo of targets) {
   const groups = new Map()
   for (const f of runPaths) {
     const label = configLabel(f)
+    const adjudication = adjudications.find((a) => a.run && f.includes(a.run)) ?? null
     const scored = score(JSON.parse(readFileSync(f, 'utf8')), truth, repo, adjudication, f)
     groups.set(label, [...(groups.get(label) ?? []), scored])
   }
@@ -509,7 +525,18 @@ writeFileSync(resultPath, out.join('\n'))
  * green result for the build being packaged.
  */
 const { analysisFingerprint } = await import('./fingerprint.mjs')
-writeFileSync(
+
+/*
+ * Only a full run may claim to be `latest`.
+ *
+ * `--repo gitea` scores one repository, and writing that as latest.json made
+ * the release gate read a single-repo result as though every repo had been
+ * scored — so a green single-repo run would have passed a gate that four other
+ * repositories had never been shown to. A partial run is not a run.
+ */
+if (only) {
+  console.log(`\nScored only ${only}; bench/results/latest.json not updated (a partial run cannot gate a release).`)
+} else writeFileSync(
   resolve(BENCH, 'results', 'latest.json'),
   JSON.stringify({
     stamp,

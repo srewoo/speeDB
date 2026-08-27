@@ -393,3 +393,98 @@ describe('shapes the round-trip count cannot see', () => {
     expect(readOrmShape('rows = Product.objects.filter(a=1)')!.materialised).toBe(false)
   })
 })
+
+
+describe('list(queryset) is a round trip', () => {
+  /*
+   * Regression from adjudicating mt-test-studio run-1, finding #5.
+   *
+   * `CloneCaseForm.populate` reads:
+   *
+   *     plan_ids = self.fields["case"].queryset.values_list("plan", flat=True)
+   *     self.fields["plan"].queryset = TestPlan.objects.filter(pk__in=plan_ids)
+   *
+   * `plan_ids` is lazy, so Django compiles `pk__in=plan_ids` into a subquery —
+   * one round trip. The published proposal wrapped it in `list(...)`, forcing a
+   * separate evaluation: two round trips where there was one, shipped as
+   * `equivalent` at `medium`.
+   *
+   * It escaped the wrong-direction rule because the evaluator pattern required
+   * the wrapped expression to contain `.objects.` literally, and a queryset
+   * reached through an attribute does not. Both sides counted 0, so there was
+   * nothing to compare.
+   */
+  const ORIGINAL = 'self.fields["plan"].queryset = TestPlan.objects.filter(pk__in=plan_ids)'
+  const PROPOSED =
+    'plan_ids = list(self.fields["case"].queryset.values_list("plan", flat=True))\n' +
+    'self.fields["plan"].queryset = TestPlan.objects.filter(pk__in=plan_ids)'
+
+  it('counts a materialised queryset reached through an attribute', () => {
+    expect(readOrmShape(ORIGINAL, null)?.queryCount).toBe(0)
+    expect(readOrmShape(PROPOSED, null)?.queryCount).toBe(1)
+  })
+
+  it('gives the value gate a count to compare, so wrong-direction can fire', () => {
+    const a = readOrmShape(ORIGINAL, null)!
+    const b = readOrmShape(PROPOSED, null)!
+    // The exact condition in gate.ts: a real count on at least one side, and
+    // the proposal issuing no fewer.
+    expect(a.queryCount > 0 || b.queryCount > 0).toBe(true)
+    expect(b.queryCount >= a.queryCount).toBe(true)
+  })
+
+  it('still counts the manager form it always did', () => {
+    expect(readOrmShape('rows = list(TestPlan.objects.filter(pk__in=ids))', null)?.queryCount).toBe(1)
+  })
+
+  it('counts a related-manager and a builder chain, inside recognisable Django', () => {
+    /*
+     * Written in context on purpose. `readOrmShape` gates on `detect` before it
+     * counts anything, and Django's `detect` is narrower than its `evaluators`:
+     * it needs `.objects.`, `QuerySet`, `F(`, `Q(` or `annotate(`. So a snippet
+     * that is *only* `list(plan.case_set.values_list("name"))` is not
+     * recognised as Django at all and returns null — the count never runs.
+     *
+     * That is a separate, pre-existing limitation of `detect`, not of the
+     * evaluator clause, and widening `detect` is a precision decision that
+     * should be made on its own evidence rather than as a side effect of this
+     * fix. Recorded here so the boundary is visible rather than assumed.
+     */
+    const withManager = readOrmShape(
+      'cases = TestCase.objects.all()\nnames = list(plan.case_set.values_list("name", flat=True))',
+      null,
+    )
+    // One: the `list(...)` of the related-manager chain. `TestCase.objects.all()`
+    // is a builder, not an evaluator — nothing has been fetched from it yet.
+    expect(withManager?.queryCount).toBe(1)
+
+    const withAnnotate = readOrmShape(
+      'qs = TestCase.objects.filter(pk__in=ids)\nrows = list(qs.annotate(n=Count("id")))',
+      null,
+    )
+    expect(withAnnotate?.queryCount).toBe(1)
+  })
+
+  it('returns null for a queryset expression Django detection cannot see', () => {
+    // The boundary above, asserted directly so a future widening of `detect`
+    // has to come here and state why.
+    expect(readOrmShape('names = list(plan.case_set.values_list("name", flat=True))', null)).toBeNull()
+  })
+
+  it('counts nothing for ordinary Python that merely wraps a call', () => {
+    // Precision-first: a marker is still required. Widening this clause to any
+    // `list(...)` would make every list construction in a data-access file a
+    // counted round trip, which is the failure mode the ORM reader exists to
+    // avoid.
+    for (const code of [
+      'len(request.POST.getlist("tag"))',
+      'list(some_dict.keys())',
+      'sorted(names)',
+      'tags = list(map(str.strip, raw))',
+    ]) {
+      const shape = readOrmShape(code, null)
+      // Either not ORM code at all, or ORM code that issues nothing.
+      expect(shape === null || shape.queryCount === 0).toBe(true)
+    }
+  })
+})

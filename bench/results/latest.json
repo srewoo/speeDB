@@ -1,15 +1,25 @@
 {
   "stamp": "2026-08-27",
-  "fingerprint": "39924b399088d9e1",
-  "repos": 3,
+  "fingerprint": "c7d5f454007220fa",
+  "repos": 5,
   "failures": [
-    "mt-test-studio: Precision was not measured — no adjudication for this run. The defect-truth floor is 14% against a 3-entry truth file, which 43 findings cannot exceed by much however good they are. Adjudicate the run (bench/AUDIT_PROMPT.md) to get a precision figure.",
-    "mt-test-studio: Counted-fact coverage 74% vs gate 80%."
+    "mt-test-studio: Precision 67% vs gate 70%.",
+    "mt-test-studio: Wrong-direction rate 5% vs gate 0%.",
+    "mt-test-studio: Counted-fact coverage 74% vs gate 80%.",
+    "gitea: Candidate coverage 0% vs gate 90%.",
+    "gitea: Precision was not measured — no adjudication for this run. The defect-truth floor is 0% against a 4-entry truth file, which 6 findings cannot exceed by much however good they are. Adjudicate the run (bench/AUDIT_PROMPT.md) to get a precision figure.",
+    "gitea: Recall @ high 0% vs gate 60%.",
+    "gitea: Counted-fact coverage 0% vs gate 80%.",
+    "gitea: Precision could not be computed. Not the same thing as passing.",
+    "gitea: Recall @ high 0% vs gate 60%.",
+    "gitea: No-op rate could not be computed. Not the same thing as passing.",
+    "gitea: Wrong-direction rate could not be computed. Not the same thing as passing.",
+    "gitea: Non-data-access rate could not be computed. Not the same thing as passing.",
+    "gitea: Counted-fact coverage could not be computed. Not the same thing as passing."
   ],
   "problems": [
-    "discourse: no truth file at bench/truth/discourse/7766dc04d0f74088d3f3bf0689b688fd017f9d03.json — run the audit in bench/AUDIT_PROMPT.md.",
-    "cal.com: no truth file at bench/truth/cal.com/176037d0afbe572f870a3c702985e7cd83fe6c0c.json — run the audit in bench/AUDIT_PROMPT.md.",
-    "gitea: no truth file at bench/truth/gitea/90c43e8e782e303aff163d35b3f54522292b8258.json — run the audit in bench/AUDIT_PROMPT.md."
+    "discourse: no run under bench/runs/discourse/7766dc04d0f74088d3f3bf0689b688fd017f9d03/ — run `npm run bench:scan -- --repo discourse` first.",
+    "cal.com: no run under bench/runs/cal.com/176037d0afbe572f870a3c702985e7cd83fe6c0c/ — run `npm run bench:scan -- --repo cal.com` first."
   ],
   "llm": true
 }

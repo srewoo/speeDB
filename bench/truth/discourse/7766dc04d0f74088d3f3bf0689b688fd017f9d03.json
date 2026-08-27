@@ -1,0 +1,60 @@
+[
+  {
+    "_note": "SAMPLED, NOT EXHAUSTIVE. discourse is ~24,000 files; this audit read the loop-bearing ActiveRecord call sites under app/models and app/jobs rather than every file. Precision scored against it is a FLOOR, not a precision figure. Recall @ high is meaningful: every entry was confirmed by reading the enclosing method in full.",
+    "_auditedBy": "Claude, blind to speeDB output for this repository",
+    "file": "app/jobs/scheduled/reindex_search.rb",
+    "startLine": 64,
+    "endLine": 64,
+    "enclosingSymbol": "rebuild_registered_search_handlers",
+    "trigger": "job",
+    "loopDepth": 2,
+    "category": "n-plus-one",
+    "severity": "high",
+    "queriesNow": "up to 10,000 individual find_by(id:) per search handler — the limit is literally `limit: 10_000`",
+    "queriesAfter": "one where(id: unindexed_record_ids).find_each, batched",
+    "why": "`unindexed_record_ids.each do |id| handler[:model_class].find_by(id: id)` issues one primary-key SELECT per id, nested inside a loop over every registered search handler; the full id list is already in memory when the loop starts.",
+    "outputIdentical": true
+  },
+  {
+    "file": "app/models/invite_redeemer.rb",
+    "startLine": 312,
+    "endLine": 314,
+    "enclosingSymbol": "InviteRedeemer#add_user_to_groups",
+    "trigger": "request-handler",
+    "loopDepth": 1,
+    "category": "n-plus-one",
+    "severity": "medium",
+    "queriesNow": "1 Group.find_by per group id, then 1 group_users.create! per group",
+    "queriesAfter": "Group.where(id: new_group_ids) once, then insert_all for the memberships",
+    "why": "new_group_ids came from invite.groups.pluck(:id) — the association was already queried — and each id is then fetched back one at a time with Group.find_by(id: id).",
+    "outputIdentical": true
+  },
+  {
+    "file": "app/models/invite_redeemer.rb",
+    "startLine": 301,
+    "endLine": 305,
+    "enclosingSymbol": "InviteRedeemer#add_user_to_private_topics",
+    "trigger": "request-handler",
+    "loopDepth": 1,
+    "category": "round-trip",
+    "severity": "medium",
+    "queriesNow": "1 TopicAllowedUser.exists? plus up to 1 create! per topic id",
+    "queriesAfter": "one exists-set query for all topic_ids, then insert_all for the missing rows",
+    "why": "`topic_ids.each` runs an existence check per topic before inserting; both the check and the insert are set operations written one row at a time.",
+    "outputIdentical": true
+  },
+  {
+    "file": "app/models/group.rb",
+    "startLine": 842,
+    "endLine": 844,
+    "enclosingSymbol": "Group.user_trust_level_change!",
+    "trigger": "request-handler",
+    "loopDepth": 1,
+    "category": "n-plus-one",
+    "severity": "medium",
+    "queriesNow": "1 find_by(id:) and 1 GroupUser exists? per desired trust group",
+    "queriesAfter": "one Group.where(id: desired) and one GroupUser.where(group_id: desired, user_id:) lookup",
+    "why": "`desired.each do |id|` fetches each trust group and checks membership individually. The row count is small (trust groups are few), which is why this is medium rather than high, but it runs on every trust-level change.",
+    "outputIdentical": true
+  }
+]

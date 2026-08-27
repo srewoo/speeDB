@@ -1,0 +1,455 @@
+{
+  "_comment": [
+    "Finding-level adjudication of run-2 on mt-test-studio @ 36972b38 \u2014 the first scan with the",
+    "list(queryset) round-trip fix and the semantic no-op rule in place.",
+    "",
+    "SAME STANDARD as run-1 and run-4: is the inefficiency real, AND would the proposed code run",
+    "in the direction claimed. adjudicated:false \u2014 one model pass, pending human confirmation.",
+    "",
+    "ONLY ONE VERDICT TRANSFERRED FROM RUN-1. Matching run-1 and run-2 findings by file, line and",
+    "proposal text, exactly one of forty was byte-identical. The SITES are stable \u2014 recall @ high",
+    "is 100% and candidate coverage 100% in both runs \u2014 but the authored PROPOSALS are almost",
+    "entirely rewritten between runs at temperature 0 with three-sample triage. Detection and",
+    "triage are reproducible; authoring is not, and no number in this file should be read as",
+    "reproducible to better than the spread across runs."
+  ],
+  "run": "run-2",
+  "adjudicatedBy": "one model pass; pending human confirmation",
+  "adjudicated": false,
+  "published": 40,
+  "tally": {
+    "real": 22,
+    "wrong": 4,
+    "marginal": 6,
+    "real-cold": 8
+  },
+  "precision": 0.75,
+  "verdicts": [
+    {
+      "n": 1,
+      "file": "tcms/testplans/views.py",
+      "line": 381,
+      "severity": "medium",
+      "category": "round-trip",
+      "title": "Fold run filtering into the aggregate",
+      "verdict": "real",
+      "why": "A real redundant or per-iteration query; the proposed rewrite is valid Django and reduces round trips or columns in the direction claimed."
+    },
+    {
+      "n": 2,
+      "file": "tcms/core/views.py",
+      "line": 176,
+      "severity": "low",
+      "category": "missing-index",
+      "title": "Add an index that matches the latest-execution lookup",
+      "verdict": "wrong",
+      "class": "no-op",
+      "why": "The 'proposal' is the original expression bound to a name (`last = (...)`). Identical queryset, identical SQL, zero counted facts \u2014 and the title says 'Add an index' while the proposal contains no index at all. The semantic no-op rule misses it because the added `last =` binding is real text."
+    },
+    {
+      "n": 3,
+      "file": "tcms/testruns/views.py",
+      "line": 316,
+      "severity": "high",
+      "category": "n-plus-one",
+      "title": "Prefetch plan-case sortkeys before the execution loop",
+      "verdict": "real",
+      "why": "A real redundant or per-iteration query; the proposed rewrite is valid Django and reduces round trips or columns in the direction claimed."
+    },
+    {
+      "n": 4,
+      "file": "tcms/core/admin_views.py",
+      "line": 1048,
+      "severity": "high",
+      "category": "round-trip",
+      "title": "Reuse the existence check result",
+      "verdict": "real",
+      "why": "A real redundant or per-iteration query; the proposed rewrite is valid Django and reduces round trips or columns in the direction claimed."
+    },
+    {
+      "n": 5,
+      "file": "tcms/core/views.py",
+      "line": 186,
+      "severity": "high",
+      "category": "round-trip",
+      "title": "Hoist the per-stream case count out of the loop",
+      "verdict": "real",
+      "why": "A real redundant or per-iteration query; the proposed rewrite is valid Django and reduces round trips or columns in the direction claimed."
+    },
+    {
+      "n": 6,
+      "file": "tcms/rpc/api/utils.py",
+      "line": 16,
+      "severity": "high",
+      "category": "full-scan",
+      "title": "Avoid loading every bug system before checking the URL",
+      "verdict": "marginal",
+      "why": "Changes which BugSystem is selected: the original iterates all and matches the URL, the proposal takes the first row with a non-empty base_url. Correctly classified behavioural, but it is a semantic change dressed as a scan fix."
+    },
+    {
+      "n": 7,
+      "file": "tcms/testcases/views.py",
+      "line": 422,
+      "severity": "high",
+      "category": "round-trip",
+      "title": "Fetch each tag once before syncing",
+      "verdict": "real",
+      "why": "A real redundant or per-iteration query; the proposed rewrite is valid Django and reduces round trips or columns in the direction claimed."
+    },
+    {
+      "n": 8,
+      "file": "tcms/core/views.py",
+      "line": 566,
+      "severity": "high",
+      "category": "n-plus-one",
+      "title": "Preload active run ids per stream in one grouped query",
+      "verdict": "real",
+      "why": "A real redundant or per-iteration query; the proposed rewrite is valid Django and reduces round trips or columns in the direction claimed."
+    },
+    {
+      "n": 9,
+      "file": "tcms/core/views.py",
+      "line": 566,
+      "severity": "high",
+      "category": "n-plus-one",
+      "title": "Fold the per-stream aggregation into a single grouped query",
+      "verdict": "real",
+      "why": "A real redundant or per-iteration query; the proposed rewrite is valid Django and reduces round trips or columns in the direction claimed."
+    },
+    {
+      "n": 10,
+      "file": "tcms/testplans/views.py",
+      "line": 172,
+      "severity": "high",
+      "category": "round-trip",
+      "title": "Batch execution creation outside the case loop",
+      "verdict": "real",
+      "why": "A real redundant or per-iteration query; the proposed rewrite is valid Django and reduces round trips or columns in the direction claimed."
+    },
+    {
+      "n": 11,
+      "file": "tcms/core/views.py",
+      "line": 877,
+      "severity": "high",
+      "category": "n-plus-one",
+      "title": "Collapse per-section counts into one grouped query",
+      "verdict": "real",
+      "why": "A real redundant or per-iteration query; the proposed rewrite is valid Django and reduces round trips or columns in the direction claimed."
+    },
+    {
+      "n": 12,
+      "file": "tcms/rpc/api/testcase.py",
+      "line": 782,
+      "severity": "high",
+      "category": "over-fetch",
+      "title": "Project only the needed fields before building the mapping",
+      "verdict": "real",
+      "why": "A real redundant or per-iteration query; the proposed rewrite is valid Django and reduces round trips or columns in the direction claimed."
+    },
+    {
+      "n": 13,
+      "file": "tcms/rpc/api/testcase.py",
+      "line": 782,
+      "severity": "high",
+      "category": "full-scan",
+      "title": "Filter sortkeys in the query instead of in Python",
+      "verdict": "real",
+      "why": "A real redundant or per-iteration query; the proposed rewrite is valid Django and reduces round trips or columns in the direction claimed."
+    },
+    {
+      "n": 14,
+      "file": "tcms/core/admin_views.py",
+      "line": 1081,
+      "severity": "medium",
+      "category": "round-trip",
+      "title": "Cache assignee users before the execution loop",
+      "verdict": "real",
+      "why": "A real redundant or per-iteration query; the proposed rewrite is valid Django and reduces round trips or columns in the direction claimed."
+    },
+    {
+      "n": 15,
+      "file": "tcms/core/views.py",
+      "line": 598,
+      "severity": "medium",
+      "category": "round-trip",
+      "title": "Hoist the per-stream test case count out of the loop",
+      "verdict": "marginal",
+      "why": "The proposal is a comment plus a reference to `stream_test_case_counts`, a variable it does not define. Incomplete as written; the intent is real."
+    },
+    {
+      "n": 16,
+      "file": "tcms/testruns/views.py",
+      "line": 327,
+      "severity": "medium",
+      "category": "batching",
+      "title": "Batch execution creation instead of creating one per case",
+      "verdict": "real",
+      "why": "A real redundant or per-iteration query; the proposed rewrite is valid Django and reduces round trips or columns in the direction claimed."
+    },
+    {
+      "n": 17,
+      "file": "tcms/core/views.py",
+      "line": 856,
+      "severity": "medium",
+      "category": "round-trip",
+      "title": "Combine the case counts into one aggregate",
+      "verdict": "real",
+      "why": "A real redundant or per-iteration query; the proposed rewrite is valid Django and reduces round trips or columns in the direction claimed."
+    },
+    {
+      "n": 18,
+      "file": "tcms/telemetry/api.py",
+      "line": 28,
+      "severity": "medium",
+      "category": "round-trip",
+      "title": "Reuse the filtered queryset for both counts",
+      "verdict": "real",
+      "why": "A real redundant or per-iteration query; the proposed rewrite is valid Django and reduces round trips or columns in the direction claimed."
+    },
+    {
+      "n": 19,
+      "file": "tcms/testcases/views.py",
+      "line": 1073,
+      "severity": "medium",
+      "category": "round-trip",
+      "title": "Collapse sibling existence probes into one query",
+      "verdict": "real",
+      "why": "A real redundant or per-iteration query; the proposed rewrite is valid Django and reduces round trips or columns in the direction claimed."
+    },
+    {
+      "n": 20,
+      "file": "tcms/testplans/views.py",
+      "line": 213,
+      "severity": "medium",
+      "category": "other",
+      "title": "Move execution counts out of the base queryset",
+      "verdict": "wrong",
+      "class": "wrong-direction",
+      "why": "Replaces database-side `annotate(Count(...))` with `prefetch_related(\"executions__status\")`, moving aggregation out of SQL and into Python and loading every execution row to do it. That is strictly more work, published as an optimisation."
+    },
+    {
+      "n": 21,
+      "file": "tcms/core/views.py",
+      "line": 502,
+      "severity": "medium",
+      "category": "full-scan",
+      "title": "Push the coverage-gap filter into the database",
+      "verdict": "real",
+      "why": "A real redundant or per-iteration query; the proposed rewrite is valid Django and reduces round trips or columns in the direction claimed."
+    },
+    {
+      "n": 22,
+      "file": "tcms/core/views.py",
+      "line": 512,
+      "severity": "medium",
+      "category": "full-scan",
+      "title": "Combine the three case-type counts into one aggregate query",
+      "verdict": "real",
+      "why": "A real redundant or per-iteration query; the proposed rewrite is valid Django and reduces round trips or columns in the direction claimed."
+    },
+    {
+      "n": 23,
+      "file": "tcms/kiwi_auth/admin.py",
+      "line": 220,
+      "severity": "medium",
+      "category": "full-scan",
+      "title": "Avoid counting all superusers in the delete guard",
+      "verdict": "real",
+      "why": "A real redundant or per-iteration query; the proposed rewrite is valid Django and reduces round trips or columns in the direction claimed."
+    },
+    {
+      "n": 24,
+      "file": "tcms/rpc/api/testcase.py",
+      "line": 1350,
+      "severity": "medium",
+      "category": "batching",
+      "title": "Use queryset update for moved test cases",
+      "verdict": "real",
+      "why": "A real redundant or per-iteration query; the proposed rewrite is valid Django and reduces round trips or columns in the direction claimed."
+    },
+    {
+      "n": 25,
+      "file": "tcms/signals.py",
+      "line": 66,
+      "severity": "medium",
+      "category": "over-fetch",
+      "title": "Fetch only the email field from superusers",
+      "verdict": "real",
+      "why": "A real redundant or per-iteration query; the proposed rewrite is valid Django and reduces round trips or columns in the direction claimed."
+    },
+    {
+      "n": 26,
+      "file": "tcms/core/context_processors.py",
+      "line": 31,
+      "severity": "medium",
+      "category": "full-scan",
+      "title": "Avoid loading every Product into each template render",
+      "verdict": "marginal",
+      "why": "`.only(\"id\",\"name\")` on a context-processor queryset that reaches every template. Any template touching a third field triggers a deferred-field reload per row \u2014 an over-fetch traded for an N+1. Correctly behavioural."
+    },
+    {
+      "n": 27,
+      "file": "tcms/testruns/models.py",
+      "line": 168,
+      "severity": "low",
+      "category": "batching",
+      "title": "Batch execution creation before attaching properties",
+      "verdict": "marginal",
+      "why": "Batching intent is right, but the proposal still calls `properties.count()` inside the rewritten block and counts no structural fact."
+    },
+    {
+      "n": 28,
+      "file": "scripts/run_assetshare_cases.py",
+      "line": 36,
+      "severity": "low",
+      "category": "round-trip",
+      "title": "Batch execution creation instead of per-case calls",
+      "verdict": "real",
+      "why": "A real redundant or per-iteration query; the proposed rewrite is valid Django and reduces round trips or columns in the direction claimed."
+    },
+    {
+      "n": 29,
+      "file": "tcms/testplans/views.py",
+      "line": 451,
+      "severity": "low",
+      "category": "n-plus-one",
+      "title": "Avoid prefetching run executions before checking for any runs",
+      "verdict": "marginal",
+      "why": "Removes `prefetch_related(\"executions__case\", \"executions__status\")`. Correct only if nothing downstream touches those relations, which the excerpt cannot show. Removing eager loading under an `n-plus-one` heading needs more evidence than this."
+    },
+    {
+      "n": 30,
+      "file": "tcms/rpc/api/testcase.py",
+      "line": 500,
+      "severity": "low",
+      "category": "missing-index",
+      "title": "Aggregate tag facets from the join table instead of Tag rows",
+      "verdict": "wrong",
+      "class": "invented-symbol",
+      "why": "`Case.objects.filter(...)`. The model here is `TestCase`; `Case` in this codebase is `django.db.models.Case`, a conditional expression with no manager. This raises AttributeError. The gate abstained because `Case` does appear in the repository vocabulary \u2014 as an import \u2014 so the symbol check sees a known name used in an impossible way."
+    },
+    {
+      "n": 31,
+      "file": "tcms/testcases/migrations/0025_add_section.py",
+      "line": 45,
+      "severity": "info",
+      "category": "n-plus-one",
+      "title": "Hoist the fallback lookups out of the per-case loop",
+      "verdict": "real-cold",
+      "why": "A real per-iteration query in a migration or test; correctly rated info by the evidence-derived severity."
+    },
+    {
+      "n": 32,
+      "file": "tcms/testcases/migrations/0009_populate_missing_text_history.py",
+      "line": 8,
+      "severity": "info",
+      "category": "n-plus-one",
+      "title": "Prefetch the latest history rows before copying text",
+      "verdict": "real-cold",
+      "why": "A real per-iteration query in a migration or test; correctly rated info by the evidence-derived severity."
+    },
+    {
+      "n": 33,
+      "file": "tcms/testcases/migrations/0006_merge_text_field_into_testcase_model.py",
+      "line": 46,
+      "severity": "info",
+      "category": "n-plus-one",
+      "title": "Preload the latest history row before the per-case update",
+      "verdict": "real-cold",
+      "why": "A real per-iteration query in a migration or test; correctly rated info by the evidence-derived severity."
+    },
+    {
+      "n": 34,
+      "file": "tcms/testcases/migrations/0025_add_section.py",
+      "line": 41,
+      "severity": "info",
+      "category": "n-plus-one",
+      "title": "Prefetch category and section lookups inside the migration loop",
+      "verdict": "real-cold",
+      "why": "A real per-iteration query in a migration or test; correctly rated info by the evidence-derived severity."
+    },
+    {
+      "n": 35,
+      "file": "tcms/rpc/tests/test_testplan.py",
+      "line": 324,
+      "severity": "info",
+      "category": "n-plus-one",
+      "title": "Collapse repeated existence checks into one query",
+      "verdict": "real-cold",
+      "why": "A real per-iteration query in a migration or test; correctly rated info by the evidence-derived severity."
+    },
+    {
+      "n": 36,
+      "file": "tcms/testcases/migrations/0039_generalize_sections_to_folders.py",
+      "line": 55,
+      "severity": "info",
+      "category": "n-plus-one",
+      "title": "Replace sibling existence checks with a set-based merge",
+      "verdict": "real-cold",
+      "why": "A real per-iteration query in a migration or test; correctly rated info by the evidence-derived severity."
+    },
+    {
+      "n": 37,
+      "file": "tcms/testruns/tests/test_run_description_untouched.py",
+      "line": 28,
+      "severity": "info",
+      "category": "n-plus-one",
+      "title": "Use a bulk status update for executions",
+      "verdict": "real-cold",
+      "why": "A real per-iteration query in a migration or test; correctly rated info by the evidence-derived severity."
+    },
+    {
+      "n": 38,
+      "file": "tcms/testruns/tests/test_run_description_untouched.py",
+      "line": 29,
+      "severity": "info",
+      "category": "n-plus-one",
+      "title": "Avoid per-execution saves in the test helper",
+      "verdict": "wrong",
+      "class": "invented-symbol",
+      "why": "`TestRun.objects.filter(pk=...).executions.update(...)`. `.executions` is a related manager on an instance, not on a QuerySet. Raises AttributeError."
+    },
+    {
+      "n": 39,
+      "file": "tcms/testcases/migrations/0036_migrate_testrail_id_custom_field.py",
+      "line": 56,
+      "severity": "info",
+      "category": "n-plus-one",
+      "title": "Stream the migration queryset instead of materializing it",
+      "verdict": "marginal",
+      "why": "`.iterator()` reduces peak memory, not queries, in a migration. Zero counted facts. Correctly rated info."
+    },
+    {
+      "n": 40,
+      "file": "tcms/testruns/migrations/0006_rename_test_case_run_to_test_execution.py",
+      "line": 22,
+      "severity": "info",
+      "category": "n-plus-one",
+      "title": "Batch permission updates instead of saving inside the loop",
+      "verdict": "real-cold",
+      "why": "A real per-iteration query in a migration or test; correctly rated info by the evidence-derived severity."
+    }
+  ],
+  "comparedToRun1": {
+    "run1": {
+      "published": 43,
+      "precision": 0.6744,
+      "wrong": 4
+    },
+    "run2": {
+      "published": 40,
+      "precision": 0.75,
+      "wrong": 4
+    },
+    "note": "The two run-1 false positives the fixes targeted are gone: forms.py:367 (list(queryset) now counted, suppressed as wrong-direction) and core/forms/fields.py:40 (redundant parentheses, suppressed as no-op). admin_views.py:1048 no longer carries the `.only(\"pk\").exists()` no-op \u2014 at that site run-2 authored a genuine batch rewrite against one of the truth defects. Four NEW false positives appeared that run-1 did not have, which is the authoring variance above, not a regression in the gates."
+  },
+  "gateEvidence": {
+    "wrongDirectionRate": 0.0,
+    "noOpRate": 0.0,
+    "nonDataAccessRate": 0.0,
+    "countedFactCoverage": 0.78,
+    "recallAtHigh": 1.0,
+    "candidateCoverage": 1.0,
+    "note": "run-2 scored alone. The 5% wrong-direction the aggregate reports belongs to run-1, whose two wrong-direction findings only became visible once list(queryset) was counted."
+  }
+}

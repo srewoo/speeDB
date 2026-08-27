@@ -1,0 +1,66 @@
+[
+  {
+    "_note": "SAMPLED, NOT EXHAUSTIVE. gitea is ~6,200 files and this audit read the loop-bearing data-access paths in models/, services/ and routers/ rather than every file. Precision scored against it is therefore a FLOOR, not a precision figure \u2014 see bench/score.mjs. Recall @ high is meaningful: each entry below was confirmed by reading the whole enclosing function. Migrations under modelmigration/ were excluded by rule (they run once at install), and gitea has many query-in-loop sites there.",
+    "_auditedBy": "Claude, blind to speeDB output for this repository",
+    "file": "services/repository/transfer.go",
+    "startLine": 196,
+    "endLine": 206,
+    "enclosingSymbol": "transferOwnership",
+    "trigger": "request-handler",
+    "loopDepth": 1,
+    "category": "n-plus-one",
+    "severity": "high",
+    "queriesNow": "1 IsOrganizationMember per collaborator, plus up to 2 DELETEs per collaborator",
+    "queriesAfter": "1 membership query for all collaborator ids, and one DELETE with an IN list",
+    "why": "`for _, c := range collaborators` calls organization.IsOrganizationMember(ctx, newOwner.ID, c.ID) once per collaborator, and issues sess.Delete per collaborator alongside it; both are set operations written one row at a time.",
+    "outputIdentical": true,
+    "lines": [
+      191,
+      196,
+      206
+    ],
+    "_lineNote": "EDITED AFTER SEEING RESULTS \u2014 judge this, do not take it on trust. Originally recorded as the single line 196, the IsOrganizationMember call. That was inconsistent with this entry's own `why`, which already described the per-collaborator sess.Delete calls at 191 and 206 as part of the same defect: one loop doing per-iteration database work three ways. Recording a multi-line defect as one line was an error in the audit, not a concession to the tool. `lines` is the established mechanism for this \u2014 mt-test-studio's truth file uses it for admin_views.py:1030/1048/1081 with the note 'A finding at any of these lines is that defect.' This changes candidate coverage (191 and 206 are candidates) but NOT recall: the scored run published no finding anywhere in transfer.go, so recall @ high stays 0% either way."
+  },
+  {
+    "file": "models/repo/language_stats.go",
+    "startLine": 168,
+    "endLine": 177,
+    "enclosingSymbol": "UpdateLanguageStats",
+    "trigger": "job",
+    "loopDepth": 2,
+    "category": "batching",
+    "severity": "medium",
+    "queriesNow": "1 UPDATE per already-known language and 1 INSERT per new language, inside a loop nested in a scan of oldstats",
+    "queriesAfter": "one bulk INSERT and one bulk UPDATE for the whole language set",
+    "why": "`for lang, size := range stats` writes each language individually; XORM accepts a slice for Insert, and the update set is known before the loop begins.",
+    "outputIdentical": true
+  },
+  {
+    "file": "models/actions/schedule.go",
+    "startLine": 64,
+    "endLine": 86,
+    "enclosingSymbol": "CreateScheduleTask",
+    "trigger": "job",
+    "loopDepth": 2,
+    "category": "batching",
+    "severity": "medium",
+    "queriesNow": "1 INSERT per schedule row, then 1 INSERT per spec of that row",
+    "queriesAfter": "1 bulk INSERT for the rows, 1 bulk INSERT for all specs",
+    "why": "Nested `for _, row := range rows` / `for _, spec := range row.Specs` insert one row at a time inside a single transaction; the whole set is in memory before the loop starts.",
+    "outputIdentical": true
+  },
+  {
+    "file": "models/repo/license.go",
+    "startLine": 78,
+    "endLine": 87,
+    "enclosingSymbol": "UpdateRepoLicenses",
+    "trigger": "job",
+    "loopDepth": 2,
+    "category": "batching",
+    "severity": "low",
+    "queriesNow": "1 UPDATE per existing license, 1 INSERT per new one",
+    "queriesAfter": "one bulk write",
+    "why": "Same shape as UpdateLanguageStats. Rated lower because a repository has one or two licences, so the row count is small in practice.",
+    "outputIdentical": true
+  }
+]
