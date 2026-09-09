@@ -19,18 +19,18 @@ const ROOT = resolve(import.meta.dirname, '..')
  *
  * Directories are walked, so a new rule file is covered the day it is added
  * rather than the day someone remembers to list it here. Deliberately excluded:
- * `src/components` and `src/pages` (presentation cannot change a finding),
- * `src/core/repo` (ingestion changes which files are read, and that is caught
+ * `packages/extension/src/components` and `src/pages` (presentation cannot change a finding),
+ * `packages/core/src/core/repo` (ingestion changes which files are read, and that is caught
  * by candidate coverage in the run itself rather than by a hash).
  */
 const WATCHED = [
-  'src/core/analyze',
-  'src/core/detect',
-  'src/config/engines.ts',
-  'src/config/explain.ts',
-  'src/config/verify',
-  'src/core/pipeline.ts',
-  'src/core/types.ts',
+  'packages/core/src/core/analyze',
+  'packages/core/src/core/detect',
+  'packages/core/src/config/engines.ts',
+  'packages/core/src/config/explain.ts',
+  'packages/core/src/config/verify',
+  'packages/core/src/core/pipeline.ts',
+  'packages/core/src/core/types.ts',
 ]
 
 function walk(path) {

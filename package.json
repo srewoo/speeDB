@@ -1,34 +1,23 @@
 {
-  "name": "speedb",
-  "version": "1.0",
+  "name": "speedb-monorepo",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
   "description": "Scan any GitHub or GitLab repo for database queries and get grounded, output-identical optimisations.",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc --noEmit && node scripts/check-cycles.mjs && vite build",
-    "preview": "vite build --config vite.preview.config.ts",
+    "build": "npm run build --workspaces --if-present",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "package": "npm run build && node scripts/package.mjs",
-    "package:debug": "npm run build && node scripts/package.mjs --with-maps",
+    "check:cycles": "node packages/extension/scripts/check-cycles.mjs",
+    "dev": "npm run dev -w @speedb/extension",
+    "package": "npm run package -w @speedb/extension",
     "release": "npm run test && npm run bench:gate && npm run package",
-    "store:icons": "python3 store/make-icons.py",
-    "store:html": "node store/build-html.mjs",
-    "store:verify": "node store/verify.mjs",
-    "store:assets": "npm run store:icons && npm run store:html && npm run store:verify",
-    "check:cycles": "node scripts/check-cycles.mjs",
     "bench": "node bench/score.mjs",
     "bench:detect": "node bench/detect.mjs",
     "bench:scan": "node bench/scan.mjs",
     "bench:pin": "node bench/pin.mjs",
     "bench:gate": "node bench/gate.mjs"
-  },
-  "dependencies": {
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "zustand": "^5.0.2"
   },
   "devDependencies": {
     "@crxjs/vite-plugin": "^2.0.0-beta.28",
@@ -42,8 +31,14 @@
     "@vitejs/plugin-react": "^4.3.4",
     "jsdom": "^26.1.0",
     "tailwindcss": "^4.0.0",
+    "tsup": "^8.5.1",
     "typescript": "^5.7.2",
     "vite": "^6.0.5",
     "vitest": "^2.1.8"
-  }
+  },
+  "workspaces": [
+    "packages/core",
+    "packages/extension",
+    "packages/mcp"
+  ]
 }

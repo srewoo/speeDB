@@ -1,0 +1,23 @@
+{
+  "name": "@speedb/extension",
+  "version": "1.2.0",
+  "private": true,
+  "type": "module",
+  "description": "speeDB Chrome extension. Not published to npm \u2014 distributed through the Chrome Web Store.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit -p tsconfig.json && node scripts/check-cycles.mjs && vite build",
+    "preview": "vite build --config vite.preview.config.ts",
+    "package": "npm run build && node scripts/package.mjs",
+    "package:debug": "npm run build && node scripts/package.mjs --with-maps",
+    "store:icons": "python3 ../../store/make-icons.py",
+    "store:html": "node ../../store/build-html.mjs",
+    "store:verify": "node ../../store/verify.mjs",
+    "check:cycles": "node scripts/check-cycles.mjs"
+  },
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zustand": "^5.0.2"
+  }
+}

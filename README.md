@@ -11,6 +11,34 @@ speed claim is never asserted: every finding carries the EXPLAIN you can run,
 the statistics queries that reveal what source code cannot, and a note on which
 line of the output actually answers the question.
 
+## Two ways to run it
+
+speeDB is a Chrome extension **and** an MCP server, over one shared analysis
+core. The pipeline, the citation checks, the equivalence verdicts and the value
+gate are the same code in both.
+
+| | |
+| --- | --- |
+| **Chrome extension** | A side panel. Scan a repo or a PR while you are looking at it. Distributed through the Chrome Web Store. |
+| **`@speedb/mcp`** | An MCP server for Claude Code, Codex or any MCP host. **The calling agent supplies the reasoning, so there is no API key.** |
+
+```sh
+claude mcp add speedb -- npx -y @speedb/mcp
+```
+
+The MCP server does not call a model. `scan_start` hands the agent a prompt,
+the agent answers it, and the server does everything that can be decided by
+machine around those answers — so a confident wrong answer is caught by the
+grounding step exactly as an API model's would be. Four of its nine tools
+(`detect_queries`, `check_equivalence`, `explain_recipe`, `schema_facts`) call
+no model at all and are useful on their own.
+
+MCP Sampling would be the obvious mechanism for this and is deliberately not
+used: it is deprecated as of protocol revision `2026-07-28` (SEP-2577). The
+server instead parks on an unresolved promise inside its injected
+`LlmProvider`, which needs no protocol feature and reimplements none of the
+pipeline.
+
 ## What is actually verified
 
 Two independent checks run on every finding, and they prove different things.
@@ -434,7 +462,8 @@ them. Opting into disk storage is a single explicit toggle that says so.
 npm install
 npm run dev            # then load dist/ as an unpacked extension
 npm run build
-npm test               # 559 tests, including end-to-end runScan and the provider adapters
+npm test               # 792 tests, including end-to-end runScan, the provider adapters,
+                       # and the MCP server over a real stdio transport
 npm run check:cycles   # circular value imports become runtime TDZ errors
 
 npm run package        # build + release/speedb-<version>.zip for the Web Store
@@ -527,37 +556,33 @@ resources, so no website can read them.
 ## Layout
 
 ```
-src/
-  config/models.ts       fallback model list
-  config/pricing.ts      per-model prices for the cost estimate
-  config/explain.ts      per-engine EXPLAIN recipes and what to look for
-  config/engines.ts      60+ engines, families, equivalence semantics
-  core/
-    types.ts             the Finding contract
-    pipeline.ts          ingest → detect → analyse → ground
-    repo/                GitHub + GitLab clients, URL parsing
-    detect/              deterministic candidate extraction
-    detect/mask.ts          comment/string masking, offset-preserving
-    detect/scope.ts         loop depth, enclosing symbol, what triggers it
-    detect/priority.ts      the ranking signal, distinct from confidence
-    detect/engine-profile.ts what the repository declares it connects to
-    analyze/             prompt, response parsing, grounding validator
-    providers/           one adapter per AI backend
-    report/export.ts     Markdown / HTML / JSON / patch
-    report/patch.ts      unified diffs
-    report/cache.ts      scan cache + content-keyed chunk cache
-    repo/tar.ts          in-browser tar.gz reader for archive ingest
-    analyze/equivalence.ts  the same-output machine check
-    analyze/performance.ts  the speed claim, and how to verify it
-    analyze/schema-facts.ts declared tables/indexes + index checks
-    analyze/sql-shape.ts    structural SQL reader
-    detect/relevance.ts     tier two: data-access files with no visible query
-    analyze/orm-shape.ts    round trips and projections, for non-SQL data access
-    analyze/gate.ts         the value gate: what does not get published, and why
-  components/            screens and primitives
-  store/app-store.ts     zustand state
-  pages/                 help.html, privacy.html
-  background/            MV3 service worker
-scripts/package.mjs      Web Store zip
-bench/                   the five-repo benchmark, its gates and its baseline
+packages/
+  core/          @speedb/core — the analysis engine. No browser, no DOM.
+    src/config/    models, pricing, 60+ engines, EXPLAIN recipes
+    src/core/
+      types.ts       the Finding contract
+      pipeline.ts    ingest -> detect -> analyse -> ground -> gate
+      storage.ts     the injected key-value seam; chrome in the extension,
+                     memory in Node. Core references `chrome` nowhere.
+      repo/          GitHub + GitLab clients, tar.gz reader, URL parsing
+      detect/        deterministic candidate extraction, masking, scope, priority
+      analyze/       prompts, parsers, grounding validator, equivalence, gate
+      providers/     one adapter per AI backend
+      report/        markdown / html / json / patch, scan + chunk cache
+  extension/     the Chrome extension. Not published to npm.
+    src/components/  screens and primitives
+    src/store/       zustand state
+    src/pages/       help.html, privacy.html
+    src/background/  MV3 service worker
+    manifest.config.ts, vite.config.ts, scripts/package.mjs
+  mcp/           @speedb/mcp — the MCP server
+    src/server.ts        tool registration, stdio transport
+    src/tools.ts         the nine tools
+    src/agent-provider.ts  the parking LlmProvider: the calling agent is the model
+    src/local-client.ts    a RepoClient over a directory on disk
+    src/session.ts         session registry, TTL reaper
+aliases.mjs      one alias table shared by every build, the bench and vitest
+bench/           the six-repo benchmark, its gates and its baseline
 ```
+
+`npm test` runs the whole suite across every package.
