@@ -1,0 +1,40 @@
+{
+  "name": "@speedb/core",
+  "version": "1.2.0",
+  "description": "Find database queries in a repository and check proposed rewrites against the source \u2014 detection, equivalence, grounding and the value gate, with no browser required.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "keywords": [
+    "sql",
+    "database",
+    "query",
+    "performance",
+    "n+1",
+    "static-analysis",
+    "orm"
+  ],
+  "sideEffects": false
+}

@@ -20,6 +20,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { createServer } from 'vite'
+import { aliases } from '../aliases.mjs'
 
 const ROOT = resolve(import.meta.dirname, '..')
 const BENCH = resolve(ROOT, 'bench')
@@ -44,7 +45,7 @@ function flag(name) {
 const server = await createServer({
   root: ROOT,
   configFile: false,
-  resolve: { alias: { '@': resolve(ROOT, 'src') } },
+  resolve: { alias: aliases },
   logLevel: 'silent',
   // Only SSR module loading is wanted here. Left to itself Vite discovers every
   // HTML entry in the project — including the store mockups, whose assets do
@@ -53,8 +54,8 @@ const server = await createServer({
   optimizeDeps: { noDiscovery: true, include: [] },
   server: { middlewareMode: true },
 })
-const { readOrmShape } = await server.ssrLoadModule('/src/core/analyze/orm-shape.ts')
-const { readSqlShape } = await server.ssrLoadModule('/src/core/analyze/sql-shape.ts')
+const { readOrmShape } = await server.ssrLoadModule('/packages/core/src/core/analyze/orm-shape.ts')
+const { readSqlShape } = await server.ssrLoadModule('/packages/core/src/core/analyze/sql-shape.ts')
 
 const config = JSON.parse(readFileSync(resolve(BENCH, 'repos.json'), 'utf8'))
 const targets = config.repos.filter((r) => (only ? r.id === only : true))

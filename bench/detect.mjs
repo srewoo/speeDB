@@ -20,6 +20,7 @@
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, lstatSync } from 'node:fs'
 import { resolve, relative, join } from 'node:path'
 import { createServer } from 'vite'
+import { aliases } from '../aliases.mjs'
 
 const BENCH = import.meta.dirname
 const ROOT = resolve(BENCH, '..')
@@ -51,7 +52,7 @@ if (!repo.sha) {
 const server = await createServer({
   root: ROOT,
   configFile: false,
-  resolve: { alias: { '@': resolve(ROOT, 'src') } },
+  resolve: { alias: aliases },
   logLevel: 'warn',
   // Only SSR module loading is wanted here. Left to itself Vite discovers every
   // HTML entry in the project — including the store mockups, whose assets do
@@ -61,9 +62,9 @@ const server = await createServer({
   server: { middlewareMode: true },
 })
 
-const { detectInFileVerbose } = await server.ssrLoadModule('/src/core/detect/scan.ts')
-const { inferEngines } = await server.ssrLoadModule('/src/core/detect/engine-profile.ts')
-const { isScannable } = await server.ssrLoadModule('/src/core/repo/client.ts')
+const { detectInFileVerbose } = await server.ssrLoadModule('/packages/core/src/core/detect/scan.ts')
+const { inferEngines } = await server.ssrLoadModule('/packages/core/src/core/detect/engine-profile.ts')
+const { isScannable } = await server.ssrLoadModule('/packages/core/src/core/repo/client.ts')
 
 /* ---- read the checkout, applying the same filter the extension does ---- */
 

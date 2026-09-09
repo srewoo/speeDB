@@ -23,6 +23,7 @@ import { readFileSync, writeFileSync, mkdirSync, readdirSync, lstatSync, existsS
 import { resolve, relative, join } from 'node:path'
 import { execSync } from 'node:child_process'
 import { createServer } from 'vite'
+import { aliases } from '../aliases.mjs'
 
 /**
  * Read `.env` before anything looks at `process.env`.
@@ -88,11 +89,13 @@ const KEYS = {
   anthropic: process.env.ANTHROPIC_API_KEY,
   openai: process.env.OPENAI_API_KEY,
   gemini: process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY,
+  openrouter: process.env.OPENROUTER_API_KEY,
 }
 const DEFAULT_MODEL = {
   anthropic: 'claude-sonnet-5',
   openai: 'gpt-5.1-mini',
   gemini: 'gemini-3-pro',
+  openrouter: 'openai/gpt-5.1',
 }
 
 /**
@@ -165,30 +168,27 @@ if (!stub && !apiKey) {
 }
 
 /*
- * The extension stores the scan cache and session secrets in `chrome.storage`.
- * There is no such thing in Node, so it is stubbed in memory — and `--no-cache`
- * is set anyway, so nothing here is load-bearing beyond not throwing.
+ * Storage no longer needs a shim.
+ *
+ * Core used to reach for `chrome.storage` directly, so this script had to
+ * assign a fake onto `globalThis.chrome` before loading a single module. Core
+ * now resolves its own backend and falls back to memory outside a browser, so
+ * the fake is gone — and with it the risk that the shim and the real thing
+ * drift. `--no-cache` is set anyway, so nothing here is load-bearing.
  */
-const memory = {}
-const area = () => ({
-  get: async (k) => ({ [k]: memory[k] }),
-  set: async (o) => { Object.assign(memory, o) },
-  remove: async (k) => { delete memory[k] },
-})
-globalThis.chrome = { storage: { session: area(), local: area() } }
 
 const server = await createServer({
   root: ROOT,
   configFile: false,
-  resolve: { alias: { '@': resolve(ROOT, 'src') } },
+  resolve: { alias: aliases },
   logLevel: 'warn',
   optimizeDeps: { noDiscovery: true, include: [] },
   server: { middlewareMode: true },
 })
 
-const { runScan } = await server.ssrLoadModule('/src/core/pipeline.ts')
-const { exportReport } = await server.ssrLoadModule('/src/core/report/export.ts')
-const { DEFAULTS } = await server.ssrLoadModule('/src/config/models.ts')
+const { runScan } = await server.ssrLoadModule('/packages/core/src/core/pipeline.ts')
+const { exportReport } = await server.ssrLoadModule('/packages/core/src/core/report/export.ts')
+const { DEFAULTS } = await server.ssrLoadModule('/packages/core/src/config/models.ts')
 
 const maxCandidatesPerChunk = chunkFlag ?? DEFAULTS.sitesPerPass
 

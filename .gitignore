@@ -1,12 +1,15 @@
 node_modules/
-dist/
-dist-preview/
-docs/
+/dist/
+/dist-preview/
+packages/*/dist/
+packages/*/dist-preview/
+packages/*/release/
+/docs/
 .playwright-mcp/
 *.local
 .DS_Store
-release/
-store/
+/release/
+/store/
 
 # Bench run outputs: reproducible from a checkout with `npm run bench:detect`,
 # large, and they embed the full file layout of whatever repository was scanned.
