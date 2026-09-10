@@ -291,6 +291,12 @@ export async function runScan(parsed: ParsedRepoUrl, opts: ScanOptions): Promise
   let apiCalls = 2 // resolve() costs two
   let ingest: 'archive' | 'per-file' = 'archive'
   let treeSize = 0
+  /**
+   * Listed but never wanted — binaries, media, lockfiles, anything over
+   * MAX_FILE_BYTES. Kept apart from `skipped`, which counts files that were
+   * wanted and could not be read.
+   */
+  let filesFiltered = 0
   let truncatedScope: string | undefined
   /** Why the single-archive ingest failed, when it did. Never swallowed. */
   let archiveError: string | undefined
@@ -407,13 +413,34 @@ export async function runScan(parsed: ParsedRepoUrl, opts: ScanOptions): Promise
     apiCalls += 1
     treeSize = tree.length
 
+    // The same filter the archive reader applies, applied here too.
+    //
+    // `isScannable` used to be passed only as the archive `accept` callback, so
+    // this path — every local scan, since `LocalClient.fetchArchive` returns
+    // null, and every forge scan whose archive request failed — read the whole
+    // tree. A checkout holding ~780MB of .mp4 under output/ was read into
+    // memory as UTF-8: RSS past 1.6GB, the event loop starved hard enough that
+    // a 120s timer never fired, and the scan answered nothing at all. Nothing
+    // downstream wanted those bytes; `detect` skips them by extension anyway.
+    //
+    // Filtered files are not `skipped++`. That counter means "listed, wanted,
+    // and could not be read", which is a number worth showing a user; a .mp4
+    // was never wanted and reporting it as a failure would bury the real ones.
+    const scannable = tree.filter((f) => isScannable(f.path, f.size))
+    filesFiltered = tree.length - scannable.length
+
     // Schema files first: they are the evidence the grounding pass checks index
     // claims against, so a scan that runs out of budget must still have them.
-    const ordered = [...tree].sort(
+    const ordered = [...scannable].sort(
       (a, b) => Number(isSchemaFile(b.path)) - Number(isSchemaFile(a.path)),
     )
 
-    report({ phase: 'fetching', message: `Reading ${ordered.length} files…` })
+    report({
+      phase: 'fetching',
+      message: filesFiltered > 0
+        ? `Reading ${ordered.length} files (${filesFiltered} skipped as binary, generated or oversized)…`
+        : `Reading ${ordered.length} files…`,
+    })
 
     for (let i = 0; i < ordered.length; i += FETCH_CONCURRENCY) {
       throwIfAborted(opts.signal)

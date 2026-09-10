@@ -919,3 +919,127 @@ describe('no-op with different text', () => {
     expect(gate.suppressed[0]!.suppression!.reason).toBe('no-op')
   })
 })
+
+/**
+ * The recognisers behind `not-data-access` have to cover what speeDB's own
+ * detector already flags as data access.
+ *
+ * Found by running the MCP server against five repositories. Every finding
+ * authored against a Python MongoDB stack or a vector store was suppressed as
+ * "not database code" — including a textbook N+1 the detector had classified
+ * `mongodb/orm` and triage had confirmed. `readOrmShape` knew ten dialects and
+ * the only Mongo one was Mongoose, whose `detect` needs the literal `mongoose`,
+ * `.populate(` or `.lean(`; a `$match`/`$group` pipeline is a list of dicts
+ * that parses as neither SQL nor a call; and no recogniser existed for a
+ * vector search at all. Detection, triage and the gate disagreed, so those
+ * stacks could never publish anything.
+ *
+ * These assert the reason is not `not-data-access` rather than asserting
+ * publication: the later rules are entitled to their own opinion about these
+ * findings, and this is a test about recognition.
+ */
+describe('not-data-access covers every stack the detector flags', () => {
+  it('recognises a Motor/PyMongo find() in a loop as data access', () => {
+    const gate = applyValueGate([finding({
+      file: 'backend/server.py',
+      category: 'n-plus-one',
+      original:
+        'for conv_id in request.conversation_ids:\n' +
+        '    conv_queries = await db.queries.find(\n' +
+        '        {"conversation_id": conv_id, "generation_method": "multi_turn"}\n' +
+        '    ).sort("turn_number", 1).to_list(100)',
+      proposed:
+        'rows = await db.queries.find(\n' +
+        '    {"conversation_id": {"$in": request.conversation_ids}, "generation_method": "multi_turn"}\n' +
+        ').sort("turn_number", 1).to_list(None)',
+    })], { files: files('x', 'backend/server.py') })
+
+    expect(gate.suppressed.map((f) => f.suppression?.reason)).not.toContain('not-data-access')
+  })
+
+  it('recognises a bare MQL aggregation pipeline literal as data access', () => {
+    const gate = applyValueGate([finding({
+      file: 'backend/auth_enhanced.py',
+      category: 'over-fetch',
+      original:
+        'pipeline = [\n' +
+        '    {"$match": {"user_id": user_id}},\n' +
+        '    {"$group": {\n' +
+        '        "_id": None,\n' +
+        '        "total_executions": {"$sum": 1},\n' +
+        '        "frameworks": {"$push": "$framework"}\n' +
+        '    }}\n' +
+        ']',
+      proposed:
+        'pipeline = [\n' +
+        '    {"$match": {"user_id": user_id}},\n' +
+        '    {"$group": {\n' +
+        '        "_id": "$framework",\n' +
+        '        "executions": {"$sum": 1}\n' +
+        '    }}\n' +
+        ']',
+    })], { files: files('x', 'backend/auth_enhanced.py') })
+
+    expect(gate.suppressed.map((f) => f.suppression?.reason)).not.toContain('not-data-access')
+  })
+
+  it('recognises a Chroma vector search as data access', () => {
+    const gate = applyValueGate([finding({
+      file: 'backend/rag/query_vectorstore.py',
+      category: 'round-trip',
+      original:
+        'results = self.collection.query(\n' +
+        '    query_embeddings=query_embedding,\n' +
+        '    n_results=min(n_results, self.collection.count()),\n' +
+        ')',
+      proposed:
+        'results = self.collection.query(\n' +
+        '    query_embeddings=query_embedding,\n' +
+        '    n_results=n_results,\n' +
+        ')',
+    })], { files: files('x', 'backend/rag/query_vectorstore.py') })
+
+    expect(gate.suppressed.map((f) => f.suppression?.reason)).not.toContain('not-data-access')
+  })
+
+  it('recognises a Pinecone index query as data access', () => {
+    const gate = applyValueGate([finding({
+      file: 'src/core/flow/grounding.ts',
+      category: 'round-trip',
+      original: 'const hits = await index.query({ vector: embedding, topK, includeMetadata: true })',
+      proposed: 'const hits = await index.query({ vector: embedding, topK, includeMetadata: false })',
+    })], { files: files('x', 'src/core/flow/grounding.ts') })
+
+    expect(gate.suppressed.map((f) => f.suppression?.reason)).not.toContain('not-data-access')
+  })
+
+  it('still suppresses genuine non-database code', () => {
+    const gate = applyValueGate([finding({
+      original: "if (sectionId) { url += sep + 'section=' + sectionId; sep = '&'; }",
+      proposed: "const parts = []\nif (sectionId) parts.push(`section=${sectionId}`)",
+      file: 'static/js/casePicker.js',
+    })], { files: files('x', 'static/js/casePicker.js') })
+
+    expect(gate.suppressed[0]!.suppression!.reason).toBe('not-data-access')
+  })
+
+  it('does not treat an in-memory list of dicts as a pipeline', () => {
+    const gate = applyValueGate([finding({
+      file: 'src/core/test-gen/constraint-test-generator.ts',
+      original:
+        'specs.push({\n' +
+        '  title: `${flowName} — "${label}" select first valid option`,\n' +
+        '  type: "positive",\n' +
+        '  expectError: false,\n' +
+        '})',
+      proposed:
+        'specs.push({\n' +
+        '  title: `${flowName} — "${label}" select last option`,\n' +
+        '  type: "edge",\n' +
+        '  expectError: true,\n' +
+        '})',
+    })], { files: files('x', 'src/core/test-gen/constraint-test-generator.ts') })
+
+    expect(gate.suppressed[0]!.suppression!.reason).toBe('not-data-access')
+  })
+})

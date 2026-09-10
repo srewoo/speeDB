@@ -20,7 +20,7 @@ import type { EnclosingScope } from '@/core/detect/scope'
 
 export type OrmDialect =
   | 'django' | 'activerecord' | 'sqlalchemy' | 'prisma' | 'sequelize'
-  | 'typeorm' | 'gorm' | 'hibernate' | 'efcore' | 'mongoose'
+  | 'typeorm' | 'gorm' | 'hibernate' | 'efcore' | 'mongoose' | 'pymongo'
 
 export interface OrmShape {
   dialect: OrmDialect
@@ -297,6 +297,45 @@ const DIALECTS: DialectSpec[] = [
     distinct: /\.\s*distinct\s*\(/,
     order: /\.\s*sort\s*\(([^)]*)\)/g,
   },
+  /*
+   * PyMongo and Motor — the Python MongoDB drivers.
+   *
+   * Mongoose was the only Mongo dialect, and its `detect` needs the literal
+   * `mongoose`, `.populate(` or `.lean(`, none of which a Python codebase
+   * contains. So `db.queries.find({...}).sort(...).to_list(100)` in a `for`
+   * loop read as "not data access" and the value gate suppressed it — a
+   * textbook N+1 that this product's own detector had already classified
+   * `mongodb/orm`.
+   *
+   * The two drivers separate cleanly on case: PyMongo is snake_case
+   * (`find_one`, `insert_one`, `count_documents`) where Mongoose is camelCase
+   * (`findOne`, `insertOne`, `countDocuments`). `detect` requires one of those
+   * names or an explicit driver import, never the shared `find(`/`aggregate(`,
+   * so neither dialect can claim the other's code.
+   *
+   * Round trips follow Motor's laziness, like Django's: `find()` returns a
+   * cursor and costs nothing. The trip is the `to_list()`, the iteration, or
+   * one of the one-shot helpers — so `evaluators` counts those and not the
+   * bare `find(`, which is what keeps a cursor built once and read once from
+   * counting twice.
+   */
+  {
+    dialect: 'pymongo',
+    evaluators: /\.\s*(?:to_list|find_one|insert_one|insert_many|update_one|update_many|delete_one|delete_many|count_documents|estimated_document_count|bulk_write|replace_one|find_one_and_update|find_one_and_delete|find_one_and_replace|distinct|create_index)\s*\(|\b(?:async\s+)?for\s+\w+(?:\s*,\s*\w+)*\s+in\s+[\w.]*\.\s*(?:find|aggregate)\s*\(/g,
+    detect: /\.\s*(?:to_list|find_one|insert_one|insert_many|update_one|update_many|delete_one|delete_many|count_documents|estimated_document_count|bulk_write|replace_one|find_one_and_update|find_one_and_delete|find_one_and_replace)\s*\(|\bAsyncIOMotorClient\b|\bAsyncIOMotorDatabase\b|\bpymongo\b|\bmotor\.motor_asyncio\b/,
+    calls: /\.\s*(?:find|find_one|aggregate|insert_one|insert_many|update_one|update_many|delete_one|delete_many|count_documents|estimated_document_count|bulk_write|replace_one|find_one_and_update|find_one_and_delete|find_one_and_replace|distinct|to_list|create_index)\s*\(/g,
+    terminals: /\.\s*(to_list|find_one|count_documents|estimated_document_count|distinct|aggregate)\s*\(/g,
+    // Mongo's join is $lookup; there is no populate()-style eager loader.
+    eager: /(\$lookup)\b/g,
+    // Projection is the second positional argument to find(), or a keyword.
+    projection: /\.\s*find(?:_one)?\s*\(\s*\{[^{}]*\}\s*,\s*(\{[^{}]*\})|projection\s*=\s*(\{[^{}]*\})/g,
+    limit: /\.\s*to_list\s*\(\s*(\d+)\s*\)|\.\s*limit\s*\(\s*(\d+)\s*\)/,
+    predicate: /\.\s*find(?:_one)?\s*\(\s*(\{[^{}]*\})/g,
+    batched: /\$in\b|\binsert_many\b|\bbulk_write\b/,
+    writes: /\.\s*(?:insert_one|insert_many|update_one|update_many|delete_one|delete_many|bulk_write|replace_one|find_one_and_update|find_one_and_delete|find_one_and_replace)\s*\(/,
+    distinct: /\.\s*distinct\s*\(/,
+    order: /\.\s*sort\s*\(([^)]*)\)/g,
+  },
 ]
 
 /**
@@ -463,6 +502,25 @@ export function ormVerificationRecipe(dialect: OrmDialect | undefined): string {
       return [
         '// Log every operation the driver issues, before and after.',
         'mongoose.set("debug", true)',
+      ].join('\n')
+    case 'pymongo':
+      return [
+        '# Count the commands this code path sends, before and after.',
+        'from pymongo import monitoring',
+        '',
+        'class Counter(monitoring.CommandListener):',
+        '    def __init__(self): self.n = 0',
+        '    def started(self, event): self.n += 1',
+        '    def succeeded(self, event): pass',
+        '    def failed(self, event): pass',
+        '',
+        'counter = Counter()',
+        'monitoring.register(counter)   # before creating the client',
+        '# run the code path, then read counter.n — this is the number that must drop.',
+        '',
+        '# For one pipeline or query, ask the server what it did instead:',
+        'db.command("explain", {"find": "<collection>", "filter": {...}},',
+        '           verbosity="executionStats")',
       ].join('\n')
     default:
       return [

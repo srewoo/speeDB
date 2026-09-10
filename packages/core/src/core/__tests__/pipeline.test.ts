@@ -727,3 +727,75 @@ describe('runScan — two-stage analysis', () => {
     expect(provider.seen.samples).toBe(1)
   })
 })
+
+/**
+ * The per-file ingest path must apply the same filter the archive path does.
+ *
+ * `isScannable` was wired in only as the archive reader's `accept` callback.
+ * `LocalClient.fetchArchive` always returns null, so an MCP scan of a local
+ * checkout never filtered anything: it read every file `listFiles` returned
+ * into memory as UTF-8. On a repository holding ~780MB of .mp4 under output/,
+ * the server's RSS climbed past 1.6GB and stopped answering entirely — four
+ * scan_next calls returned nothing in seventeen minutes, and not even the
+ * 120s timeout fired, because the event loop never got a turn. The forge
+ * clients reach the same code whenever an archive request fails.
+ */
+describe('runScan — per-file ingest applies isScannable', () => {
+  const unscannable = [
+    { path: 'output/video/demo.mp4', size: 174 * 1024 * 1024 },
+    { path: 'output/audio/mixed.mp3', size: 6 * 1024 * 1024 },
+    { path: 'assets/logo.png', size: 4096 },
+    { path: 'package-lock.json', size: 900_000 },
+    { path: 'src/generated_huge.py', size: 2 * 1024 * 1024 },
+  ]
+
+  it('never reads a file isScannable rejects', async () => {
+    const readFile = vi.fn(async (_r: RepoRef, path: string) =>
+      path === 'src/repo.py' ? SOURCE : path === 'db/schema.sql' ? SCHEMA : '# hi')
+
+    const client = fakeClient({
+      archive: null,
+      listFiles: async () => [
+        { path: 'src/repo.py', size: SOURCE.length },
+        { path: 'db/schema.sql', size: SCHEMA.length },
+        ...unscannable,
+      ],
+      readFile,
+    })
+
+    const report = await runScan(parsed, {
+      ...BASE,
+      deps: { client, provider: fakeProvider(() => JSON.stringify(GOOD_FINDING)) },
+    })
+
+    const read = readFile.mock.calls.map((c) => c[1])
+    for (const f of unscannable) expect(read, f.path).not.toContain(f.path)
+    expect(read).toContain('src/repo.py')
+    expect(report.stats.filesFetched).toBe(2)
+  })
+
+  it('does not count a filtered file as a read failure', async () => {
+    const client = fakeClient({
+      archive: null,
+      listFiles: async () => [{ path: 'src/repo.py', size: SOURCE.length }, ...unscannable],
+      readFile: async (_r: RepoRef, path: string) => (path === 'src/repo.py' ? SOURCE : '# hi'),
+    })
+
+    const report = await runScan(parsed, {
+      ...BASE,
+      deps: { client, provider: fakeProvider(() => JSON.stringify(GOOD_FINDING)) },
+    })
+    expect(report.stats.filesSkipped).toBe(0)
+  })
+
+  it('still raises when every listed file is filtered out', async () => {
+    const client = fakeClient({
+      archive: null,
+      listFiles: async () => unscannable,
+      readFile: async () => '# never',
+    })
+    await expect(
+      runScan(parsed, { ...BASE, deps: { client, provider: fakeProvider(() => '{}') } }),
+    ).rejects.toThrow(/could be read|no .*files/i)
+  })
+})

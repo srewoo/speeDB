@@ -27,14 +27,31 @@ export interface Session {
 const SESSION_TTL_MS = 30 * 60 * 1000
 
 /**
- * Concurrent sessions allowed.
+ * Concurrent *running* scans allowed.
  *
  * `runScan` is re-entrant and holds no module state, so the limit is memory
  * rather than correctness — a large monorepo is hundreds of megabytes of file
  * bodies, and three of those is already more than most machines should spend on
  * a background code review.
+ *
+ * It counts running scans only, which is what the memory argument is actually
+ * about. A finished scan has released those file bodies: `runScan` has
+ * returned and all that is retained is its report. Counting finished scans too
+ * meant a fourth scan was refused while three completed ones sat idle, and the
+ * only way through was `scan_cancel` on a scan that had already produced its
+ * report — cancelling something finished, to free memory nobody was holding.
  */
-const MAX_SESSIONS = 3
+const MAX_ACTIVE_SESSIONS = 3
+
+/**
+ * Finished sessions kept for `scan_report`, newest first.
+ *
+ * Reports are small next to file bodies, but "small" is not "free" and a
+ * long-lived stdio server would otherwise accumulate them for the life of the
+ * editor. Past this, the oldest finished session is dropped — never a running
+ * one, and never in preference to a running one.
+ */
+const MAX_RETAINED_SESSIONS = 16
 
 export class SessionStore {
   private sessions = new Map<string, Session>()
@@ -49,11 +66,13 @@ export class SessionStore {
    */
   start(parsed: ParsedRepoUrl, opts: Omit<ScanOptions, 'signal' | 'deps'>, client?: RepoClient): Session {
     this.reap()
-    if (this.sessions.size >= MAX_SESSIONS) {
+    const active = [...this.sessions.values()].filter(isActive)
+    if (active.length >= MAX_ACTIVE_SESSIONS) {
       throw new Error(
-        `${MAX_SESSIONS} scans are already open. Finish one, or call scan_cancel, before starting another.`,
+        `${MAX_ACTIVE_SESSIONS} scans are already running. Answer one to completion, or call scan_cancel, before starting another.`,
       )
     }
+    this.evictOldestFinished()
 
     const provider = new AgentProvider(opts.model)
     const abort = new AbortController()
@@ -105,6 +124,29 @@ export class SessionStore {
     return [...this.sessions.values()]
   }
 
+  /**
+   * Keep the retained set bounded, dropping finished sessions oldest-first.
+   *
+   * Only finished sessions are candidates. A running scan is never evicted to
+   * make room, however old it is: it is holding an agent mid-conversation, and
+   * dropping it would strand a parked prompt that the agent is about to answer.
+   */
+  private evictOldestFinished(): void {
+    if (this.sessions.size < MAX_RETAINED_SESSIONS) return
+
+    const finished = [...this.sessions.values()]
+      .filter((s) => !isActive(s))
+      .sort((a, b) => a.lastTouchedAt - b.lastTouchedAt)
+
+    let over = this.sessions.size - MAX_RETAINED_SESSIONS + 1
+    for (const s of finished) {
+      if (over <= 0) break
+      s.provider.close('Session evicted to make room for a new scan.')
+      this.sessions.delete(s.id)
+      over--
+    }
+  }
+
   /** Drop sessions nobody has touched inside the TTL, freeing their file bodies. */
   private reap(): void {
     const cutoff = Date.now() - SESSION_TTL_MS
@@ -116,4 +158,15 @@ export class SessionStore {
       }
     }
   }
+}
+
+/**
+ * A scan still doing work, and therefore still holding file bodies.
+ *
+ * `report` and `error` are both set from `start`'s own continuations, so
+ * exactly one of them is non-null once `runScan` has settled — which makes
+ * "neither is set" the definition of still running.
+ */
+function isActive(s: Session): boolean {
+  return s.report === null && s.error === null
 }

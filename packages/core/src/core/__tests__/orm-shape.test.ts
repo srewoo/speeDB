@@ -488,3 +488,66 @@ describe('list(queryset) is a round trip', () => {
     }
   })
 })
+
+/**
+ * PyMongo and Motor — the Python MongoDB drivers.
+ *
+ * Mongoose was the only Mongo dialect, and its `detect` requires the literal
+ * `mongoose`, `.populate(` or `.lean(`, none of which appear in Python. So a
+ * Motor N+1 read as "not data access" and could never publish. The snake_case
+ * method names are what separate the two drivers cleanly.
+ */
+describe('pymongo/motor', () => {
+  it('recognises an awaited find().to_list() as data access', () => {
+    const shape = readOrmShape(
+      'conv_queries = await db.queries.find(\n' +
+      '    {"conversation_id": conv_id}\n' +
+      ').sort("turn_number", 1).to_list(100)',
+    )
+    expect(shape).not.toBeNull()
+    expect(shape!.dialect).toBe('pymongo')
+    expect(shape!.queryCount).toBeGreaterThanOrEqual(1)
+  })
+
+  it('counts a to_list per iteration as a round trip inside a loop', () => {
+    const shape = readOrmShape(
+      'for conv_id in ids:\n' +
+      '    rows = await db.queries.find({"conversation_id": conv_id}).to_list(100)',
+      inLoop,
+    )
+    expect(shape!.dialect).toBe('pymongo')
+    expect(shape!.queryCount).toBeGreaterThanOrEqual(1)
+  })
+
+  it('sees the $in rewrite as batched', () => {
+    const shape = readOrmShape(
+      'rows = await db.queries.find({"conversation_id": {"$in": ids}}).to_list(None)',
+    )
+    expect(shape!.dialect).toBe('pymongo')
+    expect(shape!.batched).toBe(true)
+  })
+
+  it('recognises the snake_case write and read helpers', () => {
+    for (const call of [
+      'await coll.insert_one(doc)',
+      'await coll.update_many({"a": 1}, {"$set": {"b": 2}})',
+      'await coll.delete_one({"_id": ObjectId(x)})',
+      'await coll.count_documents({"user_id": uid})',
+      'doc = await coll.find_one({"_id": ObjectId(script_id)})',
+    ]) {
+      const shape = readOrmShape(call)
+      expect(shape, call).not.toBeNull()
+      expect(shape!.dialect, call).toBe('pymongo')
+    }
+  })
+
+  it('does not claim Python for a Mongoose chain', () => {
+    const shape = readOrmShape('const u = await User.find({ active: true }).populate("org").lean()')
+    expect(shape!.dialect).toBe('mongoose')
+  })
+
+  it('has a verification recipe', () => {
+    expect(ormVerificationRecipe('pymongo')).not.toBe('')
+    expect(ormVerificationRecipe('pymongo')).toMatch(/command_logger|monitoring|explain/i)
+  })
+})

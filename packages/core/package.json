@@ -1,7 +1,7 @@
 {
   "name": "@speedb/core",
   "version": "1.2.0",
-  "description": "Find database queries in a repository and check proposed rewrites against the source \u2014 detection, equivalence, grounding and the value gate, with no browser required.",
+  "description": "Find database queries in a repository and check proposed rewrites against the source — detection, equivalence, grounding and the value gate, with no browser required.",
   "license": "MIT",
   "type": "module",
   "engines": {
@@ -25,7 +25,8 @@
   ],
   "scripts": {
     "build": "tsup",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepare": "tsup"
   },
   "keywords": [
     "sql",

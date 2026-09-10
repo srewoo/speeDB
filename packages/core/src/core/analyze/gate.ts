@@ -18,13 +18,14 @@ import type { Finding, Severity } from '@/core/types'
 import type { EnclosingScope } from '@/core/detect/scope'
 import { readSqlShape } from './sql-shape'
 import { readOrmShape } from './orm-shape'
+import { readQueryDsl } from './query-dsl'
 
 export type SuppressionReason =
   /** `proposed` is identical to `original` after collapsing whitespace. */
   | 'no-op'
   /** The proposal issues at least as many queries as the original. */
   | 'wrong-direction'
-  /** Neither side parses as SQL or as ORM data access. */
+  /** Neither side parses as SQL, ORM data access, or a recognised query DSL. */
   | 'not-data-access'
   /** Migration/seed/test code, and the claim is purely about speed. */
   | 'cold-path'
@@ -183,12 +184,22 @@ function judge(
   const ormA = readOrmShape(original, scope)
   const ormB = readOrmShape(proposed, scope)
 
+  // SQL and the ORM dialects cover five of the fourteen access styles the
+  // detector emits. The other nine reached this rule with no recogniser at
+  // all, so it suppressed the detector's own output: a `$match`/`$group`
+  // pipeline, a Chroma search and a Pinecone query were each reported as "not
+  // database code" after detection had flagged the site and triage had
+  // confirmed it. `readQueryDsl` answers only the recognition question these
+  // styles need — see the note there on why it carries no round-trip count.
+  const dslA = readQueryDsl(original)
+  const dslB = readQueryDsl(proposed)
+
   /* 3. not-data-access — checked before direction, because a snippet that is
         not data access has no query count to compare. */
-  if (!isSqlA && !isSqlB && !ormA && !ormB) {
+  if (!isSqlA && !isSqlB && !ormA && !ormB && !dslA && !dslB) {
     return {
       reason: 'not-data-access',
-      detail: 'Neither the original nor the proposal parses as a query or as ORM data access — this is not database code, so a database finding does not apply to it.',
+      detail: 'Neither the original nor the proposal parses as a query, as ORM data access, or as a query DSL speeDB recognises — this is not database code, so a database finding does not apply to it.',
     }
   }
 
