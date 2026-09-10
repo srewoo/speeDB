@@ -1,6 +1,6 @@
 {
   "name": "@speedb/mcp",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "MCP server that scans a GitHub or GitLab repo for database queries and grounds every proposed rewrite against the source. The calling agent supplies the reasoning — no API key required.",
   "license": "MIT",
   "type": "module",
@@ -26,7 +26,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
-    "@speedb/core": "1.2.0",
+    "@speedb/core": "1.2.1",
     "zod": "^3.24.1"
   },
   "keywords": [

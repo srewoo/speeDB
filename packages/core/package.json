@@ -1,6 +1,6 @@
 {
   "name": "@speedb/core",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Find database queries in a repository and check proposed rewrites against the source — detection, equivalence, grounding and the value gate, with no browser required.",
   "license": "MIT",
   "type": "module",
